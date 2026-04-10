@@ -52,14 +52,16 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- DeepSeek for Chat (OpenAI compatible) -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-vertex-ai-gemini</artifactId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
+        <!-- Mistral AI for Embeddings -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-vertex-ai-embedding</artifactId>
+            <artifactId>spring-ai-starter-model-mistral-ai</artifactId>
         </dependency>
 
 
@@ -77,6 +79,12 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-vector-store-qdrant</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <version>1.68.0</version>
         </dependency>
 
         <dependency>

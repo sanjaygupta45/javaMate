@@ -1,20 +1,19 @@
 package com.example.javamate.client;
 
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.vertexai.gemini.VertexAiGeminiChatOptions;
 import org.springframework.stereotype.Component;
 
 
-
 @Component
-public class VertexClient {
+public class DeepSeekClient {
 
     private final ChatClient chatClient;
 
-    public VertexClient(ChatClient.Builder builder) {
+    public DeepSeekClient(ChatClient.Builder builder) {
 
-        VertexAiGeminiChatOptions options = VertexAiGeminiChatOptions.builder()
+        ChatOptions options = ChatOptions.builder()
                 .temperature(0.2)
                 .build();
 
@@ -24,7 +23,8 @@ public class VertexClient {
     }
 
     public String ask(Prompt prompt) {
-       return  chatClient.prompt(prompt).call().content();
+        return chatClient.prompt(prompt).call().content();
     }
 
 }
+

@@ -1,6 +1,6 @@
 package com.example.javamate.service.impl;
 
-import com.example.javamate.client.VertexClient;
+import com.example.javamate.client.DeepSeekClient;
 import com.example.javamate.service.AIService;
 import com.example.javamate.service.VectorDatabaseService;
 import lombok.AllArgsConstructor;
@@ -16,7 +16,7 @@ import java.util.List;
 @AllArgsConstructor
 public class AIServiceImpl implements AIService {
 
-    private final VertexClient vertexClient;
+    private final DeepSeekClient deepSeekClient;
     private final VectorDatabaseService vectorDatabaseService;
 
     @Override
@@ -26,7 +26,7 @@ public class AIServiceImpl implements AIService {
 
         Prompt prompt = buildPrompt(userQuery, docs);
 
-        return vertexClient.ask(prompt);
+        return deepSeekClient.ask(prompt);
     }
 
     private Prompt buildPrompt(String userQuery, List<Document> documents) {
