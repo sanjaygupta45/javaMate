@@ -2,9 +2,9 @@ package com.example.javamate.dto;
 
 
 import lombok.Data;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.codec.multipart.FilePart;
 
 @Data
 public class DocumentIngestionRequestDTO {
-    private MultipartFile file;
+    private FilePart file;
 }

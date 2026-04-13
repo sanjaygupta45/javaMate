@@ -4,11 +4,12 @@ import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
 import com.example.javamate.service.AIService;
 import com.example.javamate.service.JavaMateService;
-import com.example.javamate.utils.ResponseUtils;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 
@@ -23,25 +24,47 @@ public class JavaMateServiceImpl implements JavaMateService {
 
     private final AIService aiService;
 
-
     @Override
-    public TextQueryResponseDTO processTextQuery(TextQueryRequestDTO textQueryRequestDTO) {
+    public Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO) {
 
-        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery().isBlank()) {
-            return ResponseUtils.buildResponse(
-                    new TextQueryResponseDTO(),
-                    NOT_OK,
-                    List.of(QUERY_EMPTY)
-            );
+        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null || 
+            textQueryRequestDTO.getQuery().isBlank()) {
+            
+            TextQueryResponseDTO errorResponse = new TextQueryResponseDTO();
+            errorResponse.setResponseStatus(NOT_OK);
+            errorResponse.setMessages(List.of(QUERY_EMPTY));
+            return Mono.just(errorResponse);
         }
 
-        String response = aiService.generateResponse(textQueryRequestDTO.getQuery());
+        return aiService.generateResponse(textQueryRequestDTO.getQuery())
+                .map(response -> {
+                    TextQueryResponseDTO responseDTO = new TextQueryResponseDTO();
+                    responseDTO.setChatResponse(response);
+                    responseDTO.setResponseStatus(OK);
+                    responseDTO.setMessages(List.of(QUERY_SUCCESS));
+                    return responseDTO;
+                })
+                .onErrorResume(error -> {
+                    logger.error("Error processing query: {}", error.getMessage());
+                    TextQueryResponseDTO errorResponse = new TextQueryResponseDTO();
+                    errorResponse.setResponseStatus(NOT_OK);
+                    errorResponse.setMessages(List.of("Error processing query: " + error.getMessage()));
+                    return Mono.just(errorResponse);
+                });
+    }
 
-        TextQueryResponseDTO responseDTO = new TextQueryResponseDTO();
-        responseDTO.setChatResponse(response);
-        responseDTO.setResponseStatus(OK);
-        responseDTO.setMessages(List.of(QUERY_SUCCESS));
+    @Override
+    public Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO) {
 
-        return responseDTO;
+        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null || 
+            textQueryRequestDTO.getQuery().isBlank()) {
+            return Flux.error(new IllegalArgumentException(QUERY_EMPTY));
+        }
+
+        return aiService.generateStreamingResponse(textQueryRequestDTO.getQuery())
+                .onErrorResume(error -> {
+                    logger.error("Error streaming response: {}", error.getMessage());
+                    return Flux.error(error);
+                });
     }
 }

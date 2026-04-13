@@ -5,9 +5,9 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Component;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 
 @Component
 public class PdfDocumentReader implements DocumentReader {
@@ -18,9 +18,9 @@ public class PdfDocumentReader implements DocumentReader {
     }
 
     @Override
-    public DocumentReaderDTO read(MultipartFile file) {
+    public DocumentReaderDTO read(InputStream inputStream) {
 
-        try (PDDocument document = Loader.loadPDF(file.getInputStream().readAllBytes())) {
+        try (PDDocument document = Loader.loadPDF(inputStream.readAllBytes())) {
 
             PDFTextStripper stripper = new PDFTextStripper();
             String text = stripper.getText(document);

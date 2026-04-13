@@ -1,11 +1,12 @@
 package com.example.javamate.readerHandler;
 
 import com.example.javamate.dto.DocumentReaderDTO;
-import org.springframework.web.multipart.MultipartFile;
+
+import java.io.InputStream;
 
 public interface DocumentReader {
 
-    DocumentReaderDTO read(MultipartFile file);
+    DocumentReaderDTO read(InputStream inputStream);
 
     boolean supports(String contentType);
 

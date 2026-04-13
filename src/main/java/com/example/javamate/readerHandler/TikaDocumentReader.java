@@ -3,8 +3,8 @@ package com.example.javamate.readerHandler;
 import com.example.javamate.dto.DocumentReaderDTO;
 import org.apache.tika.Tika;
 import org.springframework.stereotype.Component;
-import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 
 @Component
 public class TikaDocumentReader implements DocumentReader {
@@ -16,11 +16,10 @@ public class TikaDocumentReader implements DocumentReader {
     }
 
     @Override
-    public DocumentReaderDTO read(MultipartFile file) {
+    public DocumentReaderDTO read(InputStream inputStream) {
 
         try {
-
-            String text = tika.parseToString(file.getInputStream());
+            String text = tika.parseToString(inputStream);
 
             DocumentReaderDTO documentDTO = new DocumentReaderDTO();
             documentDTO.setContent(text);
