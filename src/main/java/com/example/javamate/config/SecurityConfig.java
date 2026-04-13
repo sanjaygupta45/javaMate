@@ -23,6 +23,8 @@ public class SecurityConfig {
                 .cors(cors -> {})    // enables cors using CorsWebFilter bean
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(auth -> auth
+                        // Allow CORS preflight requests
+                        .pathMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         // Public endpoints - no authentication required
                         .pathMatchers("/actuator/**").permitAll()
                         .pathMatchers("/auth/**").permitAll()

@@ -53,13 +53,7 @@ public class UserServiceImpl implements UserService {
                 .map(savedUser -> {
                     log.info("User registered successfully with ID: {}", savedUser.getUserId());
                     String token = jwtService.generateToken(savedUser);
-                    return AuthResponseDTO.of(
-                            token,
-                            savedUser.getUserId(),
-                            savedUser.getName(),
-                            savedUser.getEmail(),
-                            jwtService.getExpirationTimeInSeconds()
-                    );
+                    return buildAuthResponseDTO(savedUser, token);
                 });
     }
 
@@ -75,13 +69,7 @@ public class UserServiceImpl implements UserService {
                 .map(user -> {
                     log.info("User logged in successfully: {}", user.getUserId());
                     String token = jwtService.generateToken(user);
-                    return AuthResponseDTO.of(
-                            token,
-                            user.getUserId(),
-                            user.getName(),
-                            user.getEmail(),
-                            jwtService.getExpirationTimeInSeconds()
-                    );
+                    return buildAuthResponseDTO(user, token);
                 });
     }
 
@@ -93,6 +81,15 @@ public class UserServiceImpl implements UserService {
     @Override
     public Mono<User> findById(Long userId) {
         return userRepository.findById(userId);
+    }
+
+    private AuthResponseDTO buildAuthResponseDTO(User user, String token) {
+        AuthResponseDTO authResponseDTO = new AuthResponseDTO();
+        authResponseDTO.setToken(token);
+        authResponseDTO.setUserId(user.getUserId());
+        authResponseDTO.setName(user.getName());
+        authResponseDTO.setEmail(user.getEmail());
+        return authResponseDTO;
     }
 }
 

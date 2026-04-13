@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -39,11 +40,16 @@ public class JwtAuthenticationFilter implements WebFilter {
             return chain.filter(exchange);
         }
 
-        String token = extractToken(exchange.getRequest());
-
-        if (token == null) {
+        if (exchange.getRequest().getMethod() == HttpMethod.OPTIONS) {
             return chain.filter(exchange);
         }
+
+        String token = extractToken(exchange.getRequest());
+
+        if (!StringUtils.hasText(token)) {
+            return chain.filter(exchange);
+        }
+
 
         if (!jwtService.isTokenValid(token)) {
             log.warn("Invalid JWT token for request: {}", path);
