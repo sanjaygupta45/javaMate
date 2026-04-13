@@ -15,4 +15,7 @@ public final class AppConstants {
     // Text query messages
     public static final String QUERY_EMPTY = "Query cannot be empty";
     public static final String QUERY_SUCCESS = "Query processed successfully";
+
+    public static final String CLAIM_USER_ID = "userId";
+    public static final String CLAIM_EMAIL = "email";
 }
