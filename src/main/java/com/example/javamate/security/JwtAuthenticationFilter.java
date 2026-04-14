@@ -75,7 +75,7 @@ public class JwtAuthenticationFilter implements WebFilter {
                             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authToken));
                 })
                 .switchIfEmpty(Mono.defer(() -> {
-                    log.warn("User not found for token userId: {}", userId);
+                    log.info("User not found for token userId: {}", userId);
                     exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                     return exchange.getResponse().setComplete();
                 }));
