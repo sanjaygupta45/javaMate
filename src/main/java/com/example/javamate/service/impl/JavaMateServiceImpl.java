@@ -25,7 +25,7 @@ public class JavaMateServiceImpl implements JavaMateService {
     private final AIService aiService;
 
     @Override
-    public Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO) {
+    public Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
 
         if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null || 
             textQueryRequestDTO.getQuery().isBlank()) {
@@ -36,7 +36,7 @@ public class JavaMateServiceImpl implements JavaMateService {
             return Mono.just(errorResponse);
         }
 
-        return aiService.generateResponse(textQueryRequestDTO.getQuery())
+        return aiService.generateResponse(textQueryRequestDTO.getQuery(), userId)
                 .map(response -> {
                     TextQueryResponseDTO responseDTO = new TextQueryResponseDTO();
                     responseDTO.setChatResponse(response);
@@ -54,14 +54,14 @@ public class JavaMateServiceImpl implements JavaMateService {
     }
 
     @Override
-    public Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO) {
+    public Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
 
         if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null || 
             textQueryRequestDTO.getQuery().isBlank()) {
             return Flux.error(new IllegalArgumentException(QUERY_EMPTY));
         }
 
-        return aiService.generateStreamingResponse(textQueryRequestDTO.getQuery())
+        return aiService.generateStreamingResponse(textQueryRequestDTO.getQuery(), userId)
                 .onErrorResume(error -> {
                     logger.error("Error streaming response: {}", error.getMessage());
                     return Flux.error(error);

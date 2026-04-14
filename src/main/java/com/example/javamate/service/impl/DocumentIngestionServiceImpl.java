@@ -1,10 +1,11 @@
 package com.example.javamate.service.impl;
 
-import com.example.javamate.dto.DocumentMetaDataDTO;
 import com.example.javamate.dto.DocumentIngestionResultDTO;
 import com.example.javamate.dto.DocumentReaderDTO;
+import com.example.javamate.entity.UserDocument;
 import com.example.javamate.factory.DocumentReaderFactory;
 import com.example.javamate.readerHandler.DocumentReader;
+import com.example.javamate.repository.UserDocumentRepository;
 import com.example.javamate.service.ChunkingService;
 import com.example.javamate.service.DocumentIngestionService;
 import com.example.javamate.service.VectorDatabaseService;
@@ -36,10 +37,11 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
     private final DocumentReaderFactory readerFactory;
     private final ChunkingService chunkingService;
     private final VectorDatabaseService vectorDatabaseService;
+    private final UserDocumentRepository userDocumentRepository;
 
     @Override
-    public Mono<DocumentIngestionResultDTO> ingest(FilePart filePart) {
-        
+    public Mono<DocumentIngestionResultDTO> ingest(FilePart filePart, Long userId) {
+
         return DataBufferUtils.join(filePart.content())
                 .map(dataBuffer -> {
                     byte[] bytes = new byte[dataBuffer.readableByteCount()];
@@ -47,78 +49,102 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
                     DataBufferUtils.release(dataBuffer);
                     return bytes;
                 })
-                .flatMap(bytes -> processDocument(filePart, bytes))
+                .flatMap(bytes -> processDocument(filePart, bytes, userId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    private Mono<DocumentIngestionResultDTO> processDocument(FilePart filePart, byte[] bytes) {
-        return Mono.fromCallable(() -> {
-            UUID documentId = UUID.randomUUID();
-            String fileName = filePart.filename();
-            String contentType = filePart.headers().getContentType() != null 
-                    ? filePart.headers().getContentType().toString() 
-                    : "application/octet-stream";
+    private Mono<DocumentIngestionResultDTO> processDocument(FilePart filePart, byte[] bytes, Long userId) {
+        String fileName = filePart.filename();
+        String contentType = filePart.headers().getContentType() != null 
+                ? filePart.headers().getContentType().toString() 
+                : "application/octet-stream";
 
-            // Create metadata DTO
-            DocumentMetaDataDTO documentMetaDataDTO = DocumentMetaDataDTO.builder()
-                    .documentId(documentId)
-                    .fileName(fileName)
-                    .contentType(contentType)
-                    .size((long) bytes.length)
-                    .uploadedAt(LocalDateTime.now())
-                    .build();
+        // Create UserDocument entity for database persistence (without documentId - will be auto-generated)
+        UserDocument userDocument = UserDocument.builder()
+                .userId(userId)
+                .fileName(fileName)
+                .contentType(contentType)
+                .fileSize((long) bytes.length)
+                .totalChunks(0) // Will be updated after chunking
+                .uploadedAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
 
-            // Select appropriate reader
-            DocumentReader documentReader = readerFactory.getReader(contentType);
+        // Save to DB first to get auto-generated documentId
+        return userDocumentRepository.save(userDocument)
+                .flatMap(savedDocument -> {
+                    Long documentId = savedDocument.getDocumentId();
+                    logger.info("Document saved with documentId: {} for userId: {}", documentId, userId);
+                    
+                    return Mono.fromCallable(() -> {
+                        // Select appropriate reader
+                        DocumentReader documentReader = readerFactory.getReader(contentType);
 
-            // Extract content using InputStream
-            InputStream inputStream = new ByteArrayInputStream(bytes);
-            DocumentReaderDTO documentReaderDTO = documentReader.read(inputStream);
+                        // Extract content using InputStream
+                        InputStream inputStream = new ByteArrayInputStream(bytes);
+                        DocumentReaderDTO documentReaderDTO = documentReader.read(inputStream);
 
-            String content = documentReaderDTO.getContent();
+                        String content = documentReaderDTO.getContent();
 
-            if (content == null || content.isBlank()) {
-                logger.info("Content not found");
-                throw new RuntimeException("Document content is empty");
-            }
+                        if (content == null || content.isBlank()) {
+                            logger.info("Content not found");
+                            throw new RuntimeException("Document content is empty");
+                        }
 
-            // Create Spring AI document
-            Document document = new Document(
-                    content,
-                    Map.of(
-                            "documentId", documentId.toString(),
-                            "fileName", Objects.requireNonNull(fileName)
-                    )
-            );
+                        // Create Spring AI document with userId in metadata
+                        Document document = new Document(
+                                content,
+                                Map.of(
+                                        "documentId", documentId.toString(),
+                                        "fileName", Objects.requireNonNull(fileName),
+                                        "userId", userId.toString()
+                                )
+                        );
 
-            // Chunk document
-            List<Document> chunks = chunkingService.chunk(document);
+                        // Chunk document
+                        List<Document> chunks = chunkingService.chunk(document);
 
-            // Attach chunk metadata
-            List<Document> enrichedChunks = new ArrayList<>();
+                        // Attach chunk metadata including userId
+                        List<Document> enrichedChunks = new ArrayList<>();
 
-            for (int i = 0; i < chunks.size(); i++) {
-                Document chunk = chunks.get(i);
+                        for (int i = 0; i < chunks.size(); i++) {
+                            Document chunk = chunks.get(i);
 
-                Map<String, Object> metadata = new HashMap<>(chunk.getMetadata());
-                metadata.put("documentId", documentId.toString());
-                metadata.put("chunkIndex", i);
-                metadata.put("fileName", fileName);
+                            Map<String, Object> metadata = new HashMap<>(chunk.getMetadata());
+                            metadata.put("documentId", documentId.toString());
+                            metadata.put("chunkIndex", i);
+                            metadata.put("fileName", fileName);
+                            metadata.put("userId", userId.toString());
 
-                enrichedChunks.add(new Document(chunk.getText(), metadata));
-            }
+                            enrichedChunks.add(new Document(chunk.getText(), metadata));
+                        }
 
-            // Store vectors
-            vectorDatabaseService.storeBatch(enrichedChunks);
+                        // Store vectors
+                        vectorDatabaseService.storeBatch(enrichedChunks);
 
-            // Build result DTO
-            DocumentIngestionResultDTO result = new DocumentIngestionResultDTO();
-            result.setDocumentId(documentMetaDataDTO.getDocumentId());
-            result.setFileName(documentMetaDataDTO.getFileName());
-            result.setTotalChunks(enrichedChunks.size());
-            result.setStoredVectors(enrichedChunks.size());
+                        // Build result DTO
+                        DocumentIngestionResultDTO result = new DocumentIngestionResultDTO();
+                        result.setDocumentId(documentId.toString());
+                        result.setFileName(fileName);
+                        result.setTotalChunks(enrichedChunks.size());
+                        result.setStoredVectors(enrichedChunks.size());
 
-            return result;
-        });
+                        return new ChunkingResult(result, enrichedChunks.size());
+                    })
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .flatMap(chunkingResult -> {
+                        // Update totalChunks in DB
+                        savedDocument.setTotalChunks(chunkingResult.totalChunks());
+                        savedDocument.setUpdatedAt(LocalDateTime.now());
+                        return userDocumentRepository.save(savedDocument)
+                                .map(updated -> {
+                                    logger.info("Document ingestion complete! documentId: {}, totalChunks: {}", 
+                                            documentId, chunkingResult.totalChunks());
+                                    return chunkingResult.result();
+                                });
+                    });
+                });
     }
+
+    private record ChunkingResult(DocumentIngestionResultDTO result, int totalChunks) {}
 }

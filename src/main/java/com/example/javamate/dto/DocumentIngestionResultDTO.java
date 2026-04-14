@@ -2,12 +2,10 @@ package com.example.javamate.dto;
 
 import lombok.Data;
 
-import java.util.UUID;
-
 @Data
 public class DocumentIngestionResultDTO {
 
-    private UUID documentId;
+    private String documentId;
 
     private String fileName;
 

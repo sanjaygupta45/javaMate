@@ -3,7 +3,6 @@ package com.example.javamate.dto;
 import lombok.*;
 
 import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Getter
 @Setter
@@ -11,7 +10,8 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DocumentMetaDataDTO {
-    private UUID documentId;
+
+    private String documentId;
 
     private String fileName;
 

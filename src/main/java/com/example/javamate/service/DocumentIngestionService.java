@@ -6,5 +6,5 @@ import reactor.core.publisher.Mono;
 
 public interface DocumentIngestionService {
 
-    Mono<DocumentIngestionResultDTO> ingest(FilePart filePart);
+    Mono<DocumentIngestionResultDTO> ingest(FilePart filePart, Long userId);
 }

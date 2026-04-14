@@ -5,7 +5,7 @@ import reactor.core.publisher.Mono;
 
 public interface AIService {
 
-    Mono<String> generateResponse(String userQuery);
+    Mono<String> generateResponse(String userQuery, Long userId);
 
-    Flux<String> generateStreamingResponse(String userQuery);
+    Flux<String> generateStreamingResponse(String userQuery, Long userId);
 }

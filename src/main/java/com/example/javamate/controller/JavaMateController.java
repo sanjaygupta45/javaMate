@@ -3,6 +3,7 @@ package com.example.javamate.controller;
 import com.example.javamate.dto.ChatChunk;
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
+import com.example.javamate.security.AuthenticatedUserContext;
 import com.example.javamate.service.JavaMateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,7 @@ import static com.example.javamate.constants.AppConstants.OK;
 public class JavaMateController {
 
     private final JavaMateService javaMateService;
+    private final AuthenticatedUserContext authContext;
 
 
      // Non-streaming endpoint - returns complete response
@@ -32,7 +34,8 @@ public class JavaMateController {
     public Mono<ResponseEntity<TextQueryResponseDTO>> askText(
             @RequestBody TextQueryRequestDTO requestDTO) {
 
-        return javaMateService.processTextQuery(requestDTO)
+        return authContext.getCurrentUserId()
+                .flatMap(userId -> javaMateService.processTextQuery(requestDTO, userId))
                 .map(response -> {
                     HttpStatus status = OK.equals(response.getResponseStatus()) 
                             ? HttpStatus.OK 
@@ -50,45 +53,10 @@ public class JavaMateController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
     public Flux<ServerSentEvent<ChatChunk>> askTextStream(@RequestBody TextQueryRequestDTO requestDTO) {
-        return javaMateService.processTextQueryStream(requestDTO)
+        return authContext.getCurrentUserId()
+                .flatMapMany(userId -> javaMateService.processTextQueryStream(requestDTO, userId))
                 .map(chunk -> ServerSentEvent.<ChatChunk>builder()
                         .data(new ChatChunk(chunk))
                         .build());
     }
-
-    // if client prefer json data
-    @PostMapping(
-            value = "/stream/json",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_NDJSON_VALUE
-    )
-    public Flux<ChatChunk> askTextStreamJson(@RequestBody TextQueryRequestDTO requestDTO) {
-        return javaMateService.processTextQueryStream(requestDTO)
-                .map(ChatChunk::new);
-    }
-    
-    // New endpoint: Accumulates response and returns complete text (useful for debugging)
-    @PostMapping(
-            value = "/stream/accumulated",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.TEXT_EVENT_STREAM_VALUE
-    )
-    public Flux<ServerSentEvent<ChatChunk>> askTextStreamAccumulated(@RequestBody TextQueryRequestDTO requestDTO) {
-        StringBuilder accumulated = new StringBuilder();
-        return javaMateService.processTextQueryStream(requestDTO)
-                .map(chunk -> {
-                    accumulated.append(chunk);
-                    return ServerSentEvent.<ChatChunk>builder()
-                            .event("chunk")
-                            .data(new ChatChunk(chunk))
-                            .build();
-                })
-                .concatWith(Flux.defer(() -> Flux.just(
-                        ServerSentEvent.<ChatChunk>builder()
-                                .event("complete")
-                                .data(new ChatChunk(accumulated.toString()))
-                                .build()
-                )));
-    }
-
 }

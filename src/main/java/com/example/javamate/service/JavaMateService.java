@@ -8,8 +8,8 @@ import reactor.core.publisher.Mono;
 public interface JavaMateService {
 
 
-    Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO);
+    Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO, Long userId);
 
 
-    Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO);
+    Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO, Long userId);
 }

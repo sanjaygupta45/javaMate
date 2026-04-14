@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 @AllArgsConstructor
 public class AIServiceImpl implements AIService {
 
-    private static final int SIMILARITY_SEARCH_LIMIT = 5;
+    private static final int SIMILARITY_SEARCH_LIMIT = 30;
     private static final String CONTEXT_SEPARATOR = "\n\n---\n\n";
 
     private static final String SYSTEM_PROMPT = """
@@ -155,9 +155,9 @@ public class AIServiceImpl implements AIService {
     private final VectorDatabaseService vectorDatabaseService;
 
     @Override
-    public Mono<String> generateResponse(String userQuery) {
+    public Mono<String> generateResponse(String userQuery, Long userId) {
         return Mono.fromCallable(() -> {
-                    List<Document> docs = vectorDatabaseService.similaritySearch(userQuery, SIMILARITY_SEARCH_LIMIT);
+                    List<Document> docs = vectorDatabaseService.similaritySearchByUserId(userQuery, SIMILARITY_SEARCH_LIMIT, userId);
                     Prompt prompt = buildPrompt(userQuery, docs);
                     return mistralClient.ask(prompt);
                 })
@@ -165,9 +165,9 @@ public class AIServiceImpl implements AIService {
     }
 
     @Override
-    public Flux<String> generateStreamingResponse(String userQuery) {
+    public Flux<String> generateStreamingResponse(String userQuery, Long userId) {
         return Mono.fromCallable(() -> {
-                    List<Document> docs = vectorDatabaseService.similaritySearch(userQuery, SIMILARITY_SEARCH_LIMIT);
+                    List<Document> docs = vectorDatabaseService.similaritySearchByUserId(userQuery, SIMILARITY_SEARCH_LIMIT, userId);
                     return buildPrompt(userQuery, docs);
                 })
                 .subscribeOn(Schedulers.boundedElastic())

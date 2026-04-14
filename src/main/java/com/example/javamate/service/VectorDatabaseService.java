@@ -6,8 +6,9 @@ import java.util.List;
 
 public interface VectorDatabaseService {
 
-        void storeBatch(List<Document> documents);
+    void storeBatch(List<Document> documents);
 
-        List<Document> similaritySearch(String query, int topK);
+    List<Document> similaritySearch(String query, int topK);
 
+    List<Document> similaritySearchByUserId(String query, int topK, Long userId);
 }
