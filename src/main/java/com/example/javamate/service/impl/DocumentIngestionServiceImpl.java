@@ -3,6 +3,7 @@ package com.example.javamate.service.impl;
 import com.example.javamate.dto.DocumentIngestionResultDTO;
 import com.example.javamate.dto.DocumentReaderDTO;
 import com.example.javamate.entity.UserDocument;
+import com.example.javamate.exception.DocumentLimitExceededException;
 import com.example.javamate.factory.DocumentReaderFactory;
 import com.example.javamate.readerHandler.DocumentReader;
 import com.example.javamate.repository.UserDocumentRepository;
@@ -15,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
@@ -39,18 +41,36 @@ public class DocumentIngestionServiceImpl implements DocumentIngestionService {
     private final VectorDatabaseService vectorDatabaseService;
     private final UserDocumentRepository userDocumentRepository;
 
+    @Value("${javamate.knowledge-base.max-documents-per-user:10}")
+    private int maxDocumentsPerUser;
+
     @Override
     public Mono<DocumentIngestionResultDTO> ingest(FilePart filePart, Long userId) {
 
-        return DataBufferUtils.join(filePart.content())
-                .map(dataBuffer -> {
-                    byte[] bytes = new byte[dataBuffer.readableByteCount()];
-                    dataBuffer.read(bytes);
-                    DataBufferUtils.release(dataBuffer);
-                    return bytes;
-                })
-                .flatMap(bytes -> processDocument(filePart, bytes, userId))
+        // Check document limit before processing
+        return checkDocumentLimit(userId)
+                .then(DataBufferUtils.join(filePart.content())
+                        .map(dataBuffer -> {
+                            byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                            dataBuffer.read(bytes);
+                            DataBufferUtils.release(dataBuffer);
+                            return bytes;
+                        })
+                        .flatMap(bytes -> processDocument(filePart, bytes, userId))
+                )
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    // check user is already reached his limit
+    private Mono<Void> checkDocumentLimit(Long userId) {
+        return userDocumentRepository.countByUserId(userId)
+                .flatMap(count -> {
+                    if (count >= maxDocumentsPerUser) {
+                        logger.warn("User {} has reached the maximum document limit of {}", userId, maxDocumentsPerUser);
+                        return Mono.error(new DocumentLimitExceededException(userId, maxDocumentsPerUser));
+                    }
+                    return Mono.empty();
+                });
     }
 
     private Mono<DocumentIngestionResultDTO> processDocument(FilePart filePart, byte[] bytes, Long userId) {

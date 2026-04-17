@@ -12,5 +12,10 @@ public interface UserDocumentRepository extends ReactiveCrudRepository<UserDocum
     Flux<UserDocument> findByUserId(Long userId);
 
     Mono<UserDocument> findByDocumentIdAndUserId(Long documentId, Long userId);
+
+    /**
+     * Count the number of documents for a user.
+     */
+    Mono<Long> countByUserId(Long userId);
 }
 

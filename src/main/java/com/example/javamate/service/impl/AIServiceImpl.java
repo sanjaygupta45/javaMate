@@ -2,8 +2,9 @@ package com.example.javamate.service.impl;
 
 import com.example.javamate.client.MistralClient;
 import com.example.javamate.service.AIService;
+import com.example.javamate.service.ChatMemoryService;
 import com.example.javamate.service.VectorDatabaseService;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -16,12 +17,20 @@ import reactor.core.scheduler.Schedulers;
 import java.util.List;
 import java.util.stream.Collectors;
 
+
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class AIServiceImpl implements AIService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AIServiceImpl.class);
+    
     private static final int SIMILARITY_SEARCH_LIMIT = 30;
     private static final String CONTEXT_SEPARATOR = "\n\n---\n\n";
+
+    private final MistralClient mistralClient;
+    private final VectorDatabaseService vectorDatabaseService;
+    private final ChatMemoryService chatMemoryService;
+
 
     private static final String SYSTEM_PROMPT = """
             You are JavaMate - a senior Java backend engineer and dedicated coding mentor.
@@ -135,56 +144,78 @@ public class AIServiceImpl implements AIService {
             - Practical over theoretical - always tie back to real usage
             """;
 
-    private static final String USER_PROMPT_TEMPLATE = """
-            ## QUESTION
-            %s
-            
-            ## RELEVANT CONTEXT (use only if helpful)
-            %s
-            
-            ## YOUR TASK
-            1. Internally infer the user's experience level from the question
-            2. Internally identify the question type and choose the right response mode
-            3. DO NOT output your analysis, reasoning, or mode selection - jump straight into the answer
-            4. Answer with the appropriate depth - not too short, not padded
-            5. Always include code when it helps understanding
-            6. Structure your answer clearly with headers/sections for long answers
-            """;
-
-    private final MistralClient mistralClient;
-    private final VectorDatabaseService vectorDatabaseService;
 
     @Override
-    public Mono<String> generateResponse(String userQuery, Long userId) {
-        return Mono.fromCallable(() -> {
-                    List<Document> docs = vectorDatabaseService.similaritySearchByUserId(userQuery, SIMILARITY_SEARCH_LIMIT, userId);
-                    Prompt prompt = buildPrompt(userQuery, docs);
-                    return mistralClient.ask(prompt);
-                })
-                .subscribeOn(Schedulers.boundedElastic());
-    }
+    public Mono<String> generateResponse(String userQuery, Long userId, String sessionId) {
+        String conversationId = buildConversationId(userId, sessionId);
 
-    @Override
-    public Flux<String> generateStreamingResponse(String userQuery, Long userId) {
-        return Mono.fromCallable(() -> {
-                    List<Document> docs = vectorDatabaseService.similaritySearchByUserId(userQuery, SIMILARITY_SEARCH_LIMIT, userId);
+        // Step 1: Save raw user query BEFORE building formatted prompt
+        // This ensures only the clean query is stored, not the RAG context
+        log.debug("Saving raw user query for session {}: '{}'", sessionId, 
+                userQuery.length() > 50 ? userQuery.substring(0, 50) + "..." : userQuery);
+        
+        return chatMemoryService.saveUserMessage(userId, sessionId, userQuery)
+                .doOnSuccess(saved -> log.debug("Raw user query saved to DB for session {}", sessionId))
+                .then(Mono.defer(() -> Mono.fromCallable(() -> {
+                    // Step 2: Build formatted prompt with RAG context (NOT saved to DB)
+                    // This runs on boundedElastic to avoid blocking reactor-tcp-nio threads
+                    List<Document> docs = vectorDatabaseService.similaritySearchByUserId(
+                            userQuery, SIMILARITY_SEARCH_LIMIT, userId);
+                    log.debug("Building formatted prompt with {} RAG documents", docs.size());
                     return buildPrompt(userQuery, docs);
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .flatMapMany(mistralClient::askStream);
+                }).subscribeOn(Schedulers.boundedElastic())))
+                .flatMap(prompt -> Mono.fromCallable(() ->
+                    // Step 3: Call LLM - SkipUserSaveChatMemory ensures only assistant response is saved
+                    mistralClient.askWithMemorySkipUserSave(prompt, conversationId)
+                ).subscribeOn(Schedulers.boundedElastic()));
     }
+
+    @Override
+    public Flux<String> generateStreamingResponse(String userQuery, Long userId, String sessionId) {
+        String conversationId = buildConversationId(userId, sessionId);
+
+        // Step 1: Save raw user query BEFORE building formatted prompt
+        log.debug("Saving raw user query for streaming session {}: '{}'", sessionId,
+                userQuery.length() > 50 ? userQuery.substring(0, 50) + "..." : userQuery);
+        
+        return chatMemoryService.saveUserMessage(userId, sessionId, userQuery)
+                .doOnSuccess(saved -> log.debug("Raw user query saved to DB for streaming session {}", sessionId))
+                .then(Mono.defer(() -> Mono.fromCallable(() -> {
+                    // Step 2: Build formatted prompt with RAG context (NOT saved to DB)
+                    // This runs on boundedElastic to avoid blocking reactor-tcp-nio threads
+                    List<Document> docs = vectorDatabaseService.similaritySearchByUserId(
+                            userQuery, SIMILARITY_SEARCH_LIMIT, userId);
+                    log.debug("Building formatted prompt with {} RAG documents for streaming", docs.size());
+                    return buildPrompt(userQuery, docs);
+                }).subscribeOn(Schedulers.boundedElastic())))
+                .flatMapMany(prompt ->
+                    // Step 3: Stream LLM response - SkipUserSaveChatMemory ensures only assistant response is saved
+                    mistralClient.askStreamWithMemorySkipUserSave(prompt, conversationId)
+                );
+    }
+
+
+    private String buildConversationId(Long userId, String sessionId) {
+        return userId + ":" + sessionId;
+    }
+
 
     private Prompt buildPrompt(String userQuery, List<Document> documents) {
-        String context = documents.stream()
-                .map(Document::getText)
-                .collect(Collectors.joining(CONTEXT_SEPARATOR));
+        String context = documents.isEmpty() ? "No specific context available." :
+                documents.stream()
+                        .map(Document::getText)
+                        .collect(Collectors.joining(CONTEXT_SEPARATOR));
 
-        String userPrompt = USER_PROMPT_TEMPLATE.formatted(userQuery, context);
+        // Internal prompt structure for LLM (not exposed to client)
+        String formattedUserPrompt = String.format(
+                "Question: %s%n%nRelevant Context (use if helpful):%n%s",
+                userQuery, context);
 
         return new Prompt(List.of(
                 new SystemMessage(SYSTEM_PROMPT),
-                new UserMessage(userPrompt)
+                new UserMessage(formattedUserPrompt)
         ));
     }
-
 }
+
+

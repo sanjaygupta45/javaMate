@@ -19,6 +19,34 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(DocumentLimitExceededException.class)
+    public Mono<ResponseEntity<ExceptionResponse>> handleDocumentLimitExceeded(
+            DocumentLimitExceededException ex,
+            ServerWebExchange exchange) {
+
+        log.warn("Document limit exceeded for user {}: {}", ex.getUserId(), ex.getMessage());
+
+        ExceptionResponse response = ResponseUtils.buildExceptionResponse(
+                HttpStatus.BAD_REQUEST, "DOCUMENT_LIMIT_EXCEEDED", ex.getMessage(),
+                exchange.getRequest().getPath().value());
+
+        return Mono.just(ResponseEntity.badRequest().body(response));
+    }
+
+    @ExceptionHandler(SessionLimitExceededException.class)
+    public Mono<ResponseEntity<ExceptionResponse>> handleSessionLimitExceeded(
+            SessionLimitExceededException ex,
+            ServerWebExchange exchange) {
+
+        log.warn("Session limit exceeded for session {}: {}", ex.getSessionId(), ex.getMessage());
+
+        ExceptionResponse response = ResponseUtils.buildExceptionResponse(
+                HttpStatus.BAD_REQUEST, "SESSION_LIMIT_EXCEEDED", ex.getMessage(),
+                exchange.getRequest().getPath().value());
+
+        return Mono.just(ResponseEntity.badRequest().body(response));
+    }
+
     @ExceptionHandler(AppException.class)
     public Mono<ResponseEntity<ExceptionResponse>> handleAppException(
             AppException ex,

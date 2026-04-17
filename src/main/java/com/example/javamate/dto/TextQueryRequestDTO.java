@@ -6,4 +6,6 @@ import lombok.Data;
 @Data
 public class TextQueryRequestDTO {
     private String query;
+
+    private String sessionId;
 }
