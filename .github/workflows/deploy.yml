@@ -131,7 +131,9 @@ jobs:
             --service-account=github-actions-deploye@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
             --set-env-vars=SPRING_PROFILES_ACTIVE=prod
             --set-env-vars=SERVER_PORT=8080
-            --add-cloudsql-instances=${{ secrets.CLOUD_SQL_CONNECTION_NAME }}
+            --set-env-vars=CLOUD_SQL_DATABASE=javamate
+            --set-env-vars=CLOUD_SQL_USERNAME=javamate
+            --set-secrets=CLOUD_SQL_HOST=CLOUD_SQL_HOST:latest
             --set-secrets=MYSQL_PASSWORD=MYSQL_PASSWORD:latest
             --set-secrets=MISTRAL_API_KEY=MISTRAL_API_KEY:latest
             --set-secrets=JWT_SECRET=JWT_SECRET:latest
