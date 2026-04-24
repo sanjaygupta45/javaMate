@@ -29,6 +29,8 @@ public class SecurityConfig {
                         .pathMatchers("/actuator/**").permitAll()
                         .pathMatchers("/auth/**").permitAll()
                         .pathMatchers("/health/**").permitAll()
+                        // Swagger UI endpoints
+                        .pathMatchers("/swagger-ui.html", "/swagger-ui/**", "/api-docs").permitAll()
                         // All other endpoints require authentication
                         .anyExchange().authenticated()
                 )

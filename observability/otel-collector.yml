@@ -5,19 +5,23 @@ receivers:
       http:
 
 exporters:
-
   otlp/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
 
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+
   logging:
     loglevel: debug
 
 service:
-
   pipelines:
-
     traces:
       receivers: [otlp]
       exporters: [otlp/tempo, logging]
+
+    logs:
+      receivers: [otlp]
+      exporters: [loki, logging]

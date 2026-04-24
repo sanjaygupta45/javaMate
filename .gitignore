@@ -31,3 +31,18 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### GCP / Deployment ###
+# Service account keys (NEVER commit these!)
+*-sa-key.json
+*.json.enc
+
+# Environment files with secrets
+.env
+.env.local
+.env.production
+
+# Terraform state (if used later)
+*.tfstate
+*.tfstate.*
+.terraform/
