@@ -16,14 +16,15 @@
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Optimized for Cloud Run
 # -----------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-alpine
+# Using Debian-slim instead of Alpine for gRPC/Netty native library compatibility
+FROM eclipse-temurin:21-jre-jammy
 
 # Install dumb-init for proper signal handling in containers
-RUN apk add --no-cache dumb-init
+RUN apt-get update && apt-get install -y --no-install-recommends dumb-init wget && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
-RUN addgroup -g 1001 javamate && \
-    adduser -u 1001 -G javamate -s /bin/sh -D javamate
+RUN groupadd -g 1001 javamate && \
+    useradd -u 1001 -g javamate -s /bin/bash -m javamate
 
 WORKDIR /app
 
