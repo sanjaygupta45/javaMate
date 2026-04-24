@@ -131,10 +131,10 @@ jobs:
             --set-env-vars=SPRING_PROFILES_ACTIVE=prod
             --set-env-vars=SERVER_PORT=8080
             --add-cloudsql-instances=${{ secrets.CLOUD_SQL_CONNECTION_NAME }}
-            --set-secrets=MYSQL_PASSWORD=mysql-password:latest
-            --set-secrets=MISTRAL_API_KEY=mistral-api-key:latest
-            --set-secrets=JWT_SECRET=jwt-secret:latest
-            --set-secrets=QDRANT_API_KEY=qdrant-api-key:latest
+            --set-secrets=MYSQL_PASSWORD=MYSQL_PASSWORD:latest
+            --set-secrets=MISTRAL_API_KEY=MISTRAL_API_KEY:latest
+            --set-secrets=JWT_SECRET=JWT_SECRET:latest
+            --set-secrets=QDRANT_API_KEY=QDRANT_API_KEY:latest
 
       - name: Show Deployed URL
         run: |
