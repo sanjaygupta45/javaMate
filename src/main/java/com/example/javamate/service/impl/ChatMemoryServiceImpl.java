@@ -24,6 +24,7 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
 
     private static final String ROLE_USER = "USER";
     private static final String ROLE_ASSISTANT = "ASSISTANT";
+    private static final String ROLE_SUMMARY = "SUMMARY"; // Role for storing compacted conversation summaries
 
     private final ChatMessageRepository chatMessageRepository;
 
@@ -125,5 +126,33 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
     @Override
     public int getMaxMessagesPerSession() {
         return maxMessagesPerSession;
+    }
+
+    @Override
+    public Mono<ChatMessage> saveSummaryMessage(Long userId, String sessionId, String summaryContent) {
+        // Store summarized conversation context with SUMMARY role
+        return saveMessage(userId, sessionId, ROLE_SUMMARY, summaryContent)
+                .doOnSuccess(saved -> logger.info("Saved summary message for session {}", sessionId));
+    }
+
+    @Override
+    public Flux<ChatMessage> getOldestMessagesForCompaction(Long userId, String sessionId, int limit) {
+        // Fetch oldest messages (excluding existing summaries) for compaction
+        return chatMessageRepository.findOldestNonSummaryMessages(userId, sessionId, limit);
+    }
+
+    @Override
+    public Mono<Void> deleteMessagesByIds(java.util.List<Long> messageIds) {
+        if (messageIds == null || messageIds.isEmpty()) {
+            return Mono.empty();
+        }
+        return chatMessageRepository.deleteByMessageIds(messageIds)
+                .doOnSuccess(v -> logger.debug("Deleted {} messages after compaction", messageIds.size()));
+    }
+
+    @Override
+    public Mono<Long> getNonSummaryMessageCount(Long userId, String sessionId) {
+        // Count messages excluding SUMMARY role to determine if compaction is needed
+        return chatMessageRepository.countNonSummaryMessages(userId, sessionId);
     }
 }

@@ -47,12 +47,15 @@ public class JwtAuthenticationFilter implements WebFilter {
         String token = extractToken(exchange.getRequest());
 
         if (!StringUtils.hasText(token)) {
+            // No token: let security chain reject as 401 for protected paths
+            log.debug("No Authorization header on request: {} {}",
+                    exchange.getRequest().getMethod(), path);
             return chain.filter(exchange);
         }
 
-
         if (!jwtService.isTokenValid(token)) {
-            log.warn("Invalid JWT token for request: {}", path);
+            log.warn("Invalid/expired JWT token for request: {} {}",
+                    exchange.getRequest().getMethod(), path);
             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
             return exchange.getResponse().setComplete();
         }

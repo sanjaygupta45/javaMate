@@ -30,6 +30,18 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
 
     @Query("SELECT * FROM chat_messages WHERE user_id = :userId AND session_id = :sessionId ORDER BY created_at DESC LIMIT 1")
     Mono<ChatMessage> findLatestMessageInSession(Long userId, String sessionId);
+
+    // Find oldest N messages (excluding SUMMARY role) for compaction
+    @Query("SELECT * FROM chat_messages WHERE user_id = :userId AND session_id = :sessionId AND role != 'SUMMARY' ORDER BY created_at ASC LIMIT :limit")
+    Flux<ChatMessage> findOldestNonSummaryMessages(Long userId, String sessionId, int limit);
+
+    // Delete specific messages by their IDs
+    @Query("DELETE FROM chat_messages WHERE message_id IN (:messageIds)")
+    Mono<Void> deleteByMessageIds(java.util.List<Long> messageIds);
+
+    // Count non-summary messages for compaction threshold check
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE user_id = :userId AND session_id = :sessionId AND role != 'SUMMARY'")
+    Mono<Long> countNonSummaryMessages(Long userId, String sessionId);
 }
 
 

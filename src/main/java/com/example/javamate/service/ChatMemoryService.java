@@ -29,4 +29,16 @@ public interface ChatMemoryService {
     Mono<Boolean> isSessionLimitReached(Long userId, String sessionId);
 
     int getMaxMessagesPerSession();
+
+    // Compact memory: save summary message with SUMMARY role
+    Mono<ChatMessage> saveSummaryMessage(Long userId, String sessionId, String summaryContent);
+
+    // Get oldest messages (excluding summaries) for compaction
+    Flux<ChatMessage> getOldestMessagesForCompaction(Long userId, String sessionId, int limit);
+
+    // Delete messages by their IDs after compaction
+    Mono<Void> deleteMessagesByIds(java.util.List<Long> messageIds);
+
+    // Count non-summary messages to check if compaction is needed
+    Mono<Long> getNonSummaryMessageCount(Long userId, String sessionId);
 }
