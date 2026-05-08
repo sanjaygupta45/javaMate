@@ -1,22 +1,7 @@
 # =============================================================================
 # JavaMate - Multi-stage Dockerfile for Cloud Run
 # =============================================================================
-# Stage 1: Build stage (optional - for CI/CD that doesn't pre-build)
-# Stage 2: Runtime stage - optimized for Cloud Run
-# =============================================================================
 
-# -----------------------------------------------------------------------------
-# Stage 1: Build (uncomment if you want to build inside Docker)
-# -----------------------------------------------------------------------------
-# FROM eclipse-temurin:21-jdk-alpine AS builder
-# WORKDIR /app
-# COPY . .
-# RUN ./mvnw clean package -DskipTests
-
-# -----------------------------------------------------------------------------
-# Stage 2: Runtime - Optimized for Cloud Run
-# -----------------------------------------------------------------------------
-# Using Debian-slim instead of Alpine for gRPC/Netty native library compatibility
 FROM eclipse-temurin:21-jre-jammy
 
 # Install dumb-init for proper signal handling in containers
