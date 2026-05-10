@@ -2,6 +2,7 @@ package com.example.javamate.agent;
 
 import com.example.javamate.agent.prompts.AgentPrompts;
 import com.example.javamate.agent.router.RouteDecision;
+import com.example.javamate.agent.tracing.AgentTracing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -14,12 +15,13 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
  * SupervisorAgent has two responsibilities:
- *   1. ROUTE  - decide which specialist agent(s) should answer (structured output).
- *   2. SYNTHESIZE - merge multiple specialist answers into one final reply.
+ *   1. ROUTE       - decide which specialist agent(s) should answer (structured output).
+ *   2. SYNTHESIZE  - merge multiple specialist answers into one final reply.
  *
  * It never answers questions itself.
  */
@@ -31,8 +33,10 @@ public class SupervisorAgent {
 
     private final ChatClient routerClient;
     private final ChatClient synthesizerClient;
+    private final AgentTracing tracing;
 
-    public SupervisorAgent(MistralAiChatModel model) {
+    public SupervisorAgent(MistralAiChatModel model, AgentTracing tracing) {
+        this.tracing = tracing;
         this.routerClient = ChatClient.builder(model)
                 .defaultSystem(AgentPrompts.SUPERVISOR_ROUTER)
                 .defaultOptions(ChatOptions.builder().temperature(0.0).build())
@@ -45,43 +49,54 @@ public class SupervisorAgent {
 
     /** Decide which agents to invoke. */
     public Mono<RouteDecision> route(AgentContext ctx) {
-        return Mono.fromCallable(() -> {
-            String userMsg = "Recent conversation (most recent last):\n"
-                    + formatHistory(ctx.history())
-                    + "\n\nNew user query:\n" + ctx.query();
-            RouteDecision decision;
-            try {
-                decision = routerClient.prompt().user(userMsg).call().entity(RouteDecision.class);
-            } catch (Exception e) {
-                log.error("[Supervisor] routing failed, falling back to JAVA_KNOWLEDGE: {}", e.getMessage());
-                decision = null;
-            }
-            if (decision == null || decision.agents() == null || decision.agents().isEmpty()) {
-                return new RouteDecision(List.of(AgentName.JAVA_KNOWLEDGE),
-                        ctx.query(), "fallback: router returned no agents");
-            }
-            // hard cap at 2
-            List<AgentName> trimmed = decision.agents().stream().distinct().limit(2).toList();
-            String refined = (decision.refinedQuery() == null || decision.refinedQuery().isBlank())
-                    ? ctx.query() : decision.refinedQuery();
-            String reason = decision.reason() == null ? "" : decision.reason();
-            log.info("[Supervisor] route={} refined='{}' reason='{}'", trimmed, refined, reason);
-            return new RouteDecision(trimmed, refined, reason);
-        }).subscribeOn(Schedulers.boundedElastic());
+        return Mono.fromCallable(() -> tracing.span(
+                "agent.supervisor.route",
+                Map.of("agent.name", "SUPERVISOR.ROUTE",
+                        "input.chars", String.valueOf(ctx.query().length())),
+                () -> {
+                    String userMsg = "Recent conversation (most recent last):\n"
+                            + formatHistory(ctx.history())
+                            + "\n\nNew user query:\n" + ctx.query();
+                    RouteDecision decision;
+                    try {
+                        decision = routerClient.prompt().user(userMsg).call().entity(RouteDecision.class);
+                    } catch (Exception e) {
+                        log.error("[Supervisor] routing failed, falling back to JAVA_KNOWLEDGE: {}", e.getMessage());
+                        decision = null;
+                    }
+                    if (decision == null || decision.agents() == null || decision.agents().isEmpty()) {
+                        tracing.tag("route.fallback", "true");
+                        return new RouteDecision(List.of(AgentName.JAVA_KNOWLEDGE),
+                                ctx.query(), "fallback: router returned no agents");
+                    }
+                    List<AgentName> trimmed = decision.agents().stream().distinct().limit(2).toList();
+                    String refined = (decision.refinedQuery() == null || decision.refinedQuery().isBlank())
+                            ? ctx.query() : decision.refinedQuery();
+                    String reason = decision.reason() == null ? "" : decision.reason();
+                    tracing.tag("route.agents", trimmed.toString());
+                    tracing.tag("route.reason", reason);
+                    log.info("[Supervisor] route={} refined='{}' reason='{}'", trimmed, refined, reason);
+                    return new RouteDecision(trimmed, refined, reason);
+                })).subscribeOn(Schedulers.boundedElastic());
     }
 
     /** Merge multiple specialist answers (blocking). */
     public Mono<String> synthesize(AgentContext ctx, List<AgentResult> results) {
-        return Mono.fromCallable(() -> synthesizerClient.prompt()
+        return Mono.fromCallable(() -> tracing.span(
+                "agent.supervisor.synthesize",
+                Map.of("synth.specialists", String.valueOf(results.size())),
+                () -> synthesizerClient.prompt()
                         .user(buildSynthesisPrompt(ctx, results))
                         .call().content())
-                .subscribeOn(Schedulers.boundedElastic());
+        ).subscribeOn(Schedulers.boundedElastic());
     }
 
     /** Merge multiple specialist answers (streaming). */
     public Flux<String> synthesizeStream(AgentContext ctx, List<AgentResult> results) {
+        Map<String, String> tags = Map.of("synth.specialists", String.valueOf(results.size()));
         String userPrompt = buildSynthesisPrompt(ctx, results);
-        return synthesizerClient.prompt().user(userPrompt).stream().content();
+        return tracing.wrap("agent.supervisor.synthesize.stream", tags,
+                synthesizerClient.prompt().user(userPrompt).stream().content());
     }
 
     private String buildSynthesisPrompt(AgentContext ctx, List<AgentResult> results) {

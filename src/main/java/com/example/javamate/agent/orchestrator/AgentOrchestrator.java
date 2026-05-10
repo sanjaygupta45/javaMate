@@ -6,6 +6,7 @@ import com.example.javamate.agent.AgentName;
 import com.example.javamate.agent.AgentResult;
 import com.example.javamate.agent.SupervisorAgent;
 import com.example.javamate.agent.router.RouteDecision;
+import com.example.javamate.agent.tracing.AgentTracing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -25,7 +26,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Entry point of the multi-agent system.
+ * Entry point of the multi-agent system. Wraps the whole turn in an
+ * "agent.orchestrator.handle" span for end-to-end Tempo traces.
  *
  * <p>Pipeline per user turn:
  * <pre>
@@ -33,6 +35,7 @@ import java.util.stream.Collectors;
  *   2. Persist the raw user message.
  *   3. Ask Supervisor to ROUTE -> RouteDecision (1 or 2 agents).
  *   4. Run selected agents in PARALLEL (blocking calls on boundedElastic).
+ *      - CODE_GEN internally runs a critic-revise reflection loop.
  *   5. If single agent  -> use its answer directly.
  *      If multiple      -> Supervisor SYNTHESIZES one final answer.
  *   6. Persist the final assistant message (triggers ChatMemory compaction).
@@ -46,12 +49,15 @@ public class AgentOrchestrator {
     private final SupervisorAgent supervisor;
     private final Map<AgentName, Agent> agents;
     private final ChatMemory chatMemory;
+    private final AgentTracing tracing;
 
     public AgentOrchestrator(SupervisorAgent supervisor,
                              List<Agent> agentBeans,
-                             ChatMemory chatMemory) {
+                             ChatMemory chatMemory,
+                             AgentTracing tracing) {
         this.supervisor = supervisor;
         this.chatMemory = chatMemory;
+        this.tracing = tracing;
         this.agents = agentBeans.stream()
                 .collect(Collectors.toMap(Agent::name, Function.identity(),
                         (a, b) -> a, () -> new EnumMap<>(AgentName.class)));
@@ -64,25 +70,34 @@ public class AgentOrchestrator {
 
     public Mono<String> handle(String query, Long userId, String sessionId) {
         String convId = conversationId(userId, sessionId);
-        return prepareContext(query, convId, userId, sessionId)
-                .flatMap(ctx -> supervisor.route(ctx)
-                        .flatMap(decision -> runAgents(ctx, decision)
-                                .flatMap(results -> finalAnswer(ctx, decision, results))))
-                .flatMap(answer -> persistAssistant(convId, answer).thenReturn(answer));
+        Map<String, String> tags = Map.of(
+                "user.id", String.valueOf(userId),
+                "session.id", sessionId,
+                "mode", "non-stream");
+        return tracing.wrap("agent.orchestrator.handle", tags,
+                prepareContext(query, convId, userId, sessionId)
+                        .flatMap(ctx -> supervisor.route(ctx)
+                                .flatMap(decision -> runAgents(ctx, decision)
+                                        .flatMap(results -> finalAnswer(ctx, decision, results))))
+                        .flatMap(answer -> persistAssistant(convId, answer).thenReturn(answer)));
     }
 
     public Flux<String> handleStream(String query, Long userId, String sessionId) {
         String convId = conversationId(userId, sessionId);
-        return prepareContext(query, convId, userId, sessionId)
-                .flatMapMany(ctx -> supervisor.route(ctx)
-                        .flatMapMany(decision -> streamAnswer(ctx, decision, convId)));
+        Map<String, String> tags = Map.of(
+                "user.id", String.valueOf(userId),
+                "session.id", sessionId,
+                "mode", "stream");
+        return tracing.wrap("agent.orchestrator.handle.stream", tags,
+                prepareContext(query, convId, userId, sessionId)
+                        .flatMapMany(ctx -> supervisor.route(ctx)
+                                .flatMapMany(decision -> streamAnswer(ctx, decision, convId))));
     }
 
     // ---------------------------------------------------------------
     // Pipeline steps
     // ---------------------------------------------------------------
 
-    /** Read recent history (NOT including current query yet) and persist the new user message. */
     private Mono<AgentContext> prepareContext(String query, String convId, Long userId, String sessionId) {
         return Mono.fromCallable(() -> {
                     List<Message> history = chatMemory.get(convId);
@@ -93,7 +108,6 @@ public class AgentOrchestrator {
                 .map(history -> new AgentContext(query, userId, sessionId, history));
     }
 
-    /** Run the chosen specialist agents in parallel and collect their results. */
     private Mono<List<AgentResult>> runAgents(AgentContext ctx, RouteDecision decision) {
         AgentContext refined = ctx.withQuery(decision.refinedQuery());
         List<Mono<AgentResult>> calls = decision.agents().stream()
@@ -110,7 +124,6 @@ public class AgentOrchestrator {
         return Flux.merge(calls).collectList();
     }
 
-    /** Non-streaming final answer (single agent -> direct, multi -> synthesize). */
     private Mono<String> finalAnswer(AgentContext ctx, RouteDecision decision, List<AgentResult> results) {
         if (results.isEmpty()) {
             return Mono.just("I couldn't route your question to any specialist. Please rephrase.");
@@ -121,7 +134,6 @@ public class AgentOrchestrator {
         return supervisor.synthesize(ctx, results);
     }
 
-    /** Streaming final answer. For single-agent route we stream the agent directly. */
     private Flux<String> streamAnswer(AgentContext ctx, RouteDecision decision, String convId) {
         AgentContext refined = ctx.withQuery(decision.refinedQuery());
         List<AgentName> chosen = decision.agents();
@@ -135,7 +147,6 @@ public class AgentOrchestrator {
                 tokens = a.stream(refined);
             }
         } else {
-            // Multiple agents: run them blocking-in-parallel, then stream the synthesis.
             tokens = Flux.merge(chosen.stream()
                             .map(agents::get).filter(Objects::nonNull)
                             .map(a -> a.run(refined)).toList())

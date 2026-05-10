@@ -7,6 +7,6 @@ package com.example.javamate.agent;
 public enum AgentName {
     PERSONAL_RAG,
     JAVA_KNOWLEDGE,
-    WEB_SEARCH
+    WEB_SEARCH,
+    CODE_GEN
 }
-

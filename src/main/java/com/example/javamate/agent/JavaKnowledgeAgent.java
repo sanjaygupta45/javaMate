@@ -1,6 +1,7 @@
 package com.example.javamate.agent;
 
 import com.example.javamate.agent.prompts.AgentPrompts;
+import com.example.javamate.agent.tracing.AgentTracing;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.mistralai.MistralAiChatModel;
@@ -9,6 +10,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.util.Map;
+
 /**
  * Pure-LLM Java/Spring/JVM expert. No external data, no tools.
  */
@@ -16,8 +19,10 @@ import reactor.core.scheduler.Schedulers;
 public class JavaKnowledgeAgent implements Agent {
 
     private final ChatClient chat;
+    private final AgentTracing tracing;
 
-    public JavaKnowledgeAgent(MistralAiChatModel model) {
+    public JavaKnowledgeAgent(MistralAiChatModel model, AgentTracing tracing) {
+        this.tracing = tracing;
         this.chat = ChatClient.builder(model)
                 .defaultSystem(AgentPrompts.JAVA_KNOWLEDGE)
                 .defaultOptions(ChatOptions.builder().temperature(0.2).build())
@@ -31,13 +36,24 @@ public class JavaKnowledgeAgent implements Agent {
 
     @Override
     public Mono<AgentResult> run(AgentContext ctx) {
-        return Mono.fromCallable(() -> chat.prompt().user(ctx.query()).call().content())
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(answer -> new AgentResult(name(), answer));
+        Map<String, String> tags = Map.of(
+                "agent.name", "JAVA_KNOWLEDGE",
+                "agent.input.chars", String.valueOf(ctx.query().length()));
+        return tracing.wrap("agent.java_knowledge", tags,
+                Mono.fromCallable(() -> chat.prompt().user(ctx.query()).call().content())
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .map(answer -> {
+                            tracing.tag("agent.output.chars", answer == null ? 0 : answer.length());
+                            return new AgentResult(name(), answer);
+                        }));
     }
 
     @Override
     public Flux<String> stream(AgentContext ctx) {
-        return chat.prompt().user(ctx.query()).stream().content();
+        Map<String, String> tags = Map.of(
+                "agent.name", "JAVA_KNOWLEDGE",
+                "agent.input.chars", String.valueOf(ctx.query().length()));
+        return tracing.wrap("agent.java_knowledge.stream", tags,
+                chat.prompt().user(ctx.query()).stream().content());
     }
 }

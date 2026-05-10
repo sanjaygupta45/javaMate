@@ -2,6 +2,7 @@ package com.example.javamate.agent;
 
 import com.example.javamate.agent.prompts.AgentPrompts;
 import com.example.javamate.agent.tools.WebSearchTools;
+import com.example.javamate.agent.tracing.AgentTracing;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.mistralai.MistralAiChatModel;
@@ -9,6 +10,8 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+
+import java.util.Map;
 
 /**
  * Answers questions that need fresh / live information. Owns the web-search tool.
@@ -18,8 +21,10 @@ import reactor.core.scheduler.Schedulers;
 public class WebSearchAgent implements Agent {
 
     private final ChatClient chat;
+    private final AgentTracing tracing;
 
-    public WebSearchAgent(MistralAiChatModel model, WebSearchTools tools) {
+    public WebSearchAgent(MistralAiChatModel model, WebSearchTools tools, AgentTracing tracing) {
+        this.tracing = tracing;
         this.chat = ChatClient.builder(model)
                 .defaultSystem(AgentPrompts.WEB_SEARCH)
                 .defaultOptions(ChatOptions.builder().temperature(0.2).build())
@@ -34,16 +39,21 @@ public class WebSearchAgent implements Agent {
 
     @Override
     public Mono<AgentResult> run(AgentContext ctx) {
-        return Mono.fromCallable(() -> chat.prompt().user(ctx.query()).call().content())
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(answer -> new AgentResult(name(), answer));
+        Map<String, String> tags = Map.of(
+                "agent.name", "WEB_SEARCH",
+                "agent.input.chars", String.valueOf(ctx.query().length()));
+        return tracing.wrap("agent.web_search", tags,
+                Mono.fromCallable(() -> chat.prompt().user(ctx.query()).call().content())
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .map(answer -> {
+                            tracing.tag("agent.output.chars", answer == null ? 0 : answer.length());
+                            return new AgentResult(name(), answer);
+                        }));
     }
 
     @Override
     public Flux<String> stream(AgentContext ctx) {
-        // Streaming + tool-calling can be tricky; for safety we use blocking call here
-        // and emit the full answer as a single chunk. Multi-agent path goes through
-        // the synthesizer anyway, which streams cleanly.
+        // Streaming + tool-calling can be tricky; safer to do blocking call and emit one chunk.
         return run(ctx).flatMapMany(r -> Flux.just(r.content()));
     }
 }
