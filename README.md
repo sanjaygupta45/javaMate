@@ -272,6 +272,47 @@ src/main/java/com/example/javamate/
 
 ---
 
+## Deployment
+
+Same image, three targets. The active Spring profile and a handful of env vars are the only difference.
+
+```mermaid
+flowchart LR
+    Dev["./mvnw package"] --> Jar["target/*.jar"]
+    Jar --> Img["Docker image<br/>(temurin 21-jre, non-root, dumb-init)"]
+
+    Img --> Local["Local: ./mvnw spring-boot:run<br/>profile=local · port 8081"]
+    Img --> Compose["docker compose up<br/>app + MySQL + OTel + Prom + Tempo + Loki + Grafana"]
+    Img --> Cloud["Cloud Run<br/>profile=prod · port 8080<br/>Cloud SQL · Secret Manager"]
+
+    Local -.-> Ext
+    Compose -.-> Ext
+    Cloud -.-> Ext
+
+    subgraph Ext["External services (all envs)"]
+        Mistral["Mistral AI"]
+        Qdrant[("Qdrant Cloud")]
+        Tavily["Tavily (optional)"]
+    end
+
+    classDef build fill:#f0f5ec,stroke:#52a838,color:#1b3a0f;
+    classDef target fill:#e8f0ff,stroke:#3367d6,color:#0b1f4d;
+    classDef ext fill:#fff7e6,stroke:#d46b08,color:#5c2c00;
+    class Dev,Jar,Img build;
+    class Local,Compose,Cloud target;
+    class Mistral,Qdrant,Tavily ext;
+```
+
+| Target | Command | Profile | Notes |
+|---|---|---|---|
+| Local dev | `./mvnw spring-boot:run` | `local` | Hits Qdrant Cloud + Cloud SQL directly |
+| Local stack | `docker compose up -d` | `local` | Adds MySQL + full observability stack |
+| Cloud Run | `gcloud run deploy` with `SPRING_PROFILES_ACTIVE=prod` | `prod` | JSON logs, smaller pool, sampling 10 %, secrets from Secret Manager |
+
+**Required env vars:** `MISTRAL_API_KEY`, `QDRANT_API_KEY`, `MYSQL_PASSWORD`, `JWT_SECRET`. Prod also needs `CLOUD_SQL_HOST`. Optional: `WEB_SEARCH_PROVIDER=tavily` + `TAVILY_API_KEY` to enable web search.
+
+---
+
 ## Things I learned doing this
 
 - An "agent" is just an LLM in a loop with tools. Multi-agent is just several of those loops with a router. The framework hype around it is louder than the actual code complexity.
