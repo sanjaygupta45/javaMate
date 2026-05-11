@@ -194,7 +194,7 @@ sequenceDiagram
     Note over M: may auto-compact<br/>(summary row)
 
     O-->>-C: final answer (Mono or Flux)
-    C-->>-U: JSON&nbsp;/&nbsp;SSE stream
+    C-->>-U: JSON or SSE stream
 ```
 
 Every step emits an OpenTelemetry span (`agent.orchestrator.handle` -> `agent.supervisor.route` -> `agent.<name>` -> `tool.web_search` / `agent.critic` / etc.), so the whole turn shows up as a waterfall in Tempo.
