@@ -1,12 +1,14 @@
 package com.example.javamate.service.impl;
 
 import com.example.javamate.agent.AgentName;
+import com.example.javamate.dto.OrchestratorResult;
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
 import com.example.javamate.agent.events.AgentStreamEvent;
 import com.example.javamate.exception.SessionLimitExceededException;
 import com.example.javamate.service.AIService;
 import com.example.javamate.service.ChatMemoryService;
+import com.example.javamate.service.ChatSessionService;
 import com.example.javamate.service.JavaMateService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -40,6 +42,7 @@ public class JavaMateServiceImpl implements JavaMateService {
 
     private final AIService aiService;
     private final ChatMemoryService chatMemoryService;
+    private final ChatSessionService chatSessionService;
 
     @Override
     public Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
@@ -58,20 +61,33 @@ public class JavaMateServiceImpl implements JavaMateService {
 
         return checkSessionLimit(userId, sessionId)
                 .then(aiService.generateDetailedResponse(userQuery, userId, sessionId))
-                .map(detailed -> {
+                .flatMap(detailed -> chatSessionService.findForUser(userId, sessionId)
+                    .map(session -> {
+                    // Backend-only visibility: log the agent pipeline so we can
+                    // understand which specialist(s) handled the query. This is
+                    // intentionally NOT exposed to the client.
+                    logger.info("[Pipeline] userId={} sessionId={} agents={} routeReason='{}' sources={} citations={}",
+                            userId,
+                            sessionId,
+                            detailed.agents() == null ? List.of()
+                                    : detailed.agents().stream().map(AgentName::name).toList(),
+                            detailed.routeReason(),
+                            detailed.sources() == null ? 0 : detailed.sources().size(),
+                            detailed.citations() == null ? 0 : detailed.citations().size());
+
                     TextQueryResponseDTO responseDTO = new TextQueryResponseDTO();
                     responseDTO.setChatResponse(detailed.answer());
                     responseDTO.setSessionId(sessionId);
+                    responseDTO.setSessionTitle(session.getTitle());
                     responseDTO.setResponseStatus(OK);
                     responseDTO.setMessages(List.of(QUERY_SUCCESS));
-                    // Multi-agent metadata
-                    responseDTO.setAgents(detailed.agents() == null ? List.of()
-                            : detailed.agents().stream().map(AgentName::name).toList());
-                    responseDTO.setRouteReason(detailed.routeReason());
+                    // Only expose web-search sources/citations to the client.
+                    // Agent pipeline metadata (agents, routeReason) and personal-RAG
+                    // citations are kept server-side only.
                     responseDTO.setSources(detailed.sources());
-                    responseDTO.setCitations(detailed.citations());
                     return responseDTO;
                 })
+                        .defaultIfEmpty(buildResponseWithoutSessionTitle(detailed, sessionId, userId)))
                 .onErrorResume(SessionLimitExceededException.class, error -> {
                     logger.warn("Session limit exceeded for session {}: {}", sessionId, error.getMessage());
                     TextQueryResponseDTO errorResponse = new TextQueryResponseDTO();
@@ -89,6 +105,29 @@ public class JavaMateServiceImpl implements JavaMateService {
                     return Mono.just(errorResponse);
                 });
     }
+
+            private TextQueryResponseDTO buildResponseWithoutSessionTitle(
+                    OrchestratorResult detailed,
+                String sessionId,
+                Long userId
+            ) {
+            logger.info("[Pipeline] userId={} sessionId={} agents={} routeReason='{}' sources={} citations={}",
+                userId,
+                sessionId,
+                detailed.agents() == null ? List.of()
+                    : detailed.agents().stream().map(AgentName::name).toList(),
+                detailed.routeReason(),
+                detailed.sources() == null ? 0 : detailed.sources().size(),
+                detailed.citations() == null ? 0 : detailed.citations().size());
+
+            TextQueryResponseDTO responseDTO = new TextQueryResponseDTO();
+            responseDTO.setChatResponse(detailed.answer());
+            responseDTO.setSessionId(sessionId);
+            responseDTO.setResponseStatus(OK);
+            responseDTO.setMessages(List.of(QUERY_SUCCESS));
+            responseDTO.setSources(detailed.sources());
+            return responseDTO;
+            }
 
     @Override
     public Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO, Long userId) {

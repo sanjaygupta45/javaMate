@@ -58,7 +58,29 @@ public class JwtServiceImpl implements JwtService {
     @Override
     public Long extractUserId(String token) {
         Claims claims = extractAllClaims(token);
-        return claims.get(CLAIM_USER_ID, Long.class);
+        Object rawUserId = claims.get(CLAIM_USER_ID);
+
+        if (rawUserId instanceof Long value) {
+            return value;
+        }
+
+        if (rawUserId instanceof Integer value) {
+            return value.longValue();
+        }
+
+        if (rawUserId instanceof Number value) {
+            return value.longValue();
+        }
+
+        if (rawUserId instanceof String value) {
+            try {
+                return Long.parseLong(value);
+            } catch (NumberFormatException ex) {
+                log.warn("Unable to parse userId claim '{}' to Long", value);
+            }
+        }
+
+        return null;
     }
 
     @Override

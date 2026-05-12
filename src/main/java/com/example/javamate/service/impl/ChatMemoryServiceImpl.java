@@ -3,8 +3,10 @@ package com.example.javamate.service.impl;
 import com.example.javamate.dto.ChatSessionDTO;
 import com.example.javamate.dto.ContinueSessionResponseDTO;
 import com.example.javamate.entity.ChatMessage;
+import com.example.javamate.entity.ChatSession;
 import com.example.javamate.repository.ChatMessageRepository;
 import com.example.javamate.service.ChatMemoryService;
+import com.example.javamate.service.ChatSessionService;
 import com.example.javamate.service.ConversationSummarizer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -29,6 +31,7 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
     private static final String ROLE_SUMMARY = "SUMMARY"; // Role for storing compacted conversation summaries
 
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatSessionService chatSessionService;
     private final ConversationSummarizer conversationSummarizer;
 
     @Value("${javamate.chat.memory.default-window-size:20}")
@@ -59,7 +62,19 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        return chatMessageRepository.save(message)
+        // 1. Ensure the parent session row exists (lazy creation so older clients
+        //    that just send a UUID still work).
+        // 2. Persist the message.
+        // 3. Touch the session: increments message_count + bumps last_message_at,
+        //    which is what we use for monitoring on the chat_sessions table.
+        // 4. For the very first user message, derive a title snippet.
+        return chatSessionService.getOrCreate(userId, sessionId)
+                .then(chatMessageRepository.save(message))
+                .flatMap(saved -> chatSessionService.touch(sessionId)
+                        .then(ROLE_USER.equals(role)
+                                ? chatSessionService.setTitleIfBlank(sessionId, content)
+                                : Mono.empty())
+                        .thenReturn(saved))
                 .doOnSuccess(saved -> logger.debug("Saved {} message for session {}", role, sessionId))
                 .doOnError(error -> logger.error("Failed to save {} message for session {}: {}",
                         role, sessionId, error.getMessage()));
@@ -79,7 +94,12 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
 
     @Override
     public Mono<Void> clearSession(Long userId, String sessionId) {
+        // chat_messages.session_id has ON DELETE CASCADE to chat_sessions.session_id,
+        // so deleting the session row also clears its messages. We still delete the
+        // messages explicitly first to keep behaviour deterministic for DBs that may
+        // have been created before the FK was added.
         return chatMessageRepository.deleteByUserIdAndSessionId(userId, sessionId)
+                .then(chatSessionService.deleteForUser(userId, sessionId))
                 .doOnSuccess(v -> logger.info("Cleared chat history for session {}", sessionId))
                 .doOnError(error -> logger.error("Failed to clear session {}: {}", sessionId, error.getMessage()));
     }
@@ -87,24 +107,27 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
     @Override
     public Mono<Void> clearAllUserSessions(Long userId) {
         return chatMessageRepository.deleteByUserId(userId)
+                .then(chatSessionService.deleteAllForUser(userId))
                 .doOnSuccess(v -> logger.info("Cleared all chat history for user {}", userId));
     }
 
     @Override
     public Flux<ChatSessionDTO> listUserSessions(Long userId) {
-        return chatMessageRepository.findDistinctSessionIdsByUserId(userId)
-                .flatMap(sessionId -> 
-                    Mono.zip(
-                        chatMessageRepository.countByUserIdAndSessionId(userId, sessionId),
-                        chatMessageRepository.findLatestMessageInSession(userId, sessionId)
-                            .map(ChatMessage::getCreatedAt)
-                            .defaultIfEmpty(LocalDateTime.now())
-                    ).map(tuple -> ChatSessionDTO.builder()
-                            .sessionId(sessionId)
-                            .messageCount(tuple.getT1())
-                            .lastMessageAt(tuple.getT2())
-                            .build())
-                );
+        // Use the chat_sessions table directly: it's the source of truth for
+        // session metadata (status / title / counts) and is far cheaper than
+        // SELECT DISTINCT over chat_messages.
+        return chatSessionService.listForUser(userId).map(this::toDTO);
+    }
+
+    private ChatSessionDTO toDTO(ChatSession s) {
+        return ChatSessionDTO.builder()
+                .sessionId(s.getSessionId())
+                .title(s.getTitle())
+                .status(s.getStatus())
+                .messageCount(s.getMessageCount() == null ? 0L : s.getMessageCount().longValue())
+                .createdAt(s.getCreatedAt())
+                .lastMessageAt(s.getLastMessageAt())
+                .build();
     }
 
     @Override
@@ -173,7 +196,8 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
                                 "Session '" + previousSessionId + "' is empty or not owned by this user."));
                     }
                     String newSessionId = generateSessionId();
-                    return conversationSummarizer.summarise(messages)
+                    return chatSessionService.createSession(userId, newSessionId)
+                            .then(conversationSummarizer.summarise(messages))
                             .flatMap(summary -> saveSummaryMessage(userId, newSessionId, summary)
                                     .thenReturn(ContinueSessionResponseDTO.builder()
                                             .sessionId(newSessionId)

@@ -18,4 +18,6 @@ public final class AppConstants {
 
     public static final String CLAIM_USER_ID = "userId";
     public static final String CLAIM_EMAIL = "email";
+    // Chat session status values (persisted in chat_sessions.status)
+    public static final String SESSION_STATUS_ACTIVE   = "ACTIVE";
 }

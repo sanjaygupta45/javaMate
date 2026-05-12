@@ -8,16 +8,20 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * DTO representing a chat session summary.
+ * Client-facing snapshot of a chat session, sourced from the
+ * {@code chat_sessions} table (the aggregate root for a conversation).
  */
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
 public class ChatSessionDTO {
-    
+
     private String sessionId;
-    private LocalDateTime lastMessageAt;
+    private String title;
+    private String status;
     private Long messageCount;
+    private LocalDateTime createdAt;
+    private LocalDateTime lastMessageAt;
 }
 

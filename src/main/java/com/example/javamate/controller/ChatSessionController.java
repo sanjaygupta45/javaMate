@@ -5,8 +5,10 @@ import com.example.javamate.dto.ChatSessionDTO;
 import com.example.javamate.dto.ContinueSessionRequestDTO;
 import com.example.javamate.dto.ContinueSessionResponseDTO;
 import com.example.javamate.dto.ResponseDTO;
+import com.example.javamate.entity.ChatSession;
 import com.example.javamate.security.AuthenticatedUserContext;
 import com.example.javamate.service.ChatMemoryService;
+import com.example.javamate.service.ChatSessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -25,6 +27,7 @@ import static com.example.javamate.constants.AppConstants.OK;
 public class ChatSessionController {
 
     private final ChatMemoryService chatMemoryService;
+    private final ChatSessionService chatSessionService;
     private final AuthenticatedUserContext authContext;
 
 
@@ -90,12 +93,34 @@ public class ChatSessionController {
     //Generate a new session ID (useful for starting a new conversation).
     @PostMapping("/new")
     public Mono<ResponseEntity<ChatSessionDTO>> createNewSession() {
-        return Mono.fromCallable(() -> {
-            ChatSessionDTO session = ChatSessionDTO.builder()
-                    .sessionId(chatMemoryService.generateSessionId())
-                    .build();
-            return ResponseEntity.ok(session);
-        });
+        return authContext.getCurrentUserId()
+                .flatMap(userId -> {
+                    String newSessionId = chatMemoryService.generateSessionId();
+                    return chatSessionService.createSession(userId, newSessionId);
+                })
+                .map(this::toSessionDTO)
+                .map(ResponseEntity::ok);
+    }
+
+    /** Monitor a single session (status, message count, activity). */
+    @GetMapping("/{sessionId}")
+    public Mono<ResponseEntity<ChatSessionDTO>> getSession(@PathVariable String sessionId) {
+        return authContext.getCurrentUserId()
+                .flatMap(userId -> chatSessionService.findForUser(userId, sessionId))
+                .map(this::toSessionDTO)
+                .map(ResponseEntity::ok)
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+
+    private ChatSessionDTO toSessionDTO(ChatSession s) {
+        return ChatSessionDTO.builder()
+                .sessionId(s.getSessionId())
+                .title(s.getTitle())
+                .status(s.getStatus())
+                .messageCount(s.getMessageCount() == null ? 0L : s.getMessageCount().longValue())
+                .createdAt(s.getCreatedAt())
+                .lastMessageAt(s.getLastMessageAt())
+                .build();
     }
 
     @PostMapping(value = "/continue",

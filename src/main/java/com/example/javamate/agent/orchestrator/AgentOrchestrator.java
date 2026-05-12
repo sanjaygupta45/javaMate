@@ -76,8 +76,13 @@ public class AgentOrchestrator {
         Mono<OrchestratorResult> pipeline = tracing.wrap("agent.orchestrator.handle", tags,
                 prepareContext(query, convId, userId, sessionId)
                         .flatMap(ctx -> supervisor.route(ctx)
-                                .doOnNext(d -> eventBus.emit(convId, new AgentStreamEvent.RouteEvent(
-                                        d.agents(), d.reason(), d.refinedQuery())))
+                                .doOnNext(d -> {
+                                    log.info("[Pipeline] userId={} sessionId={} query='{}' -> agents={} reason='{}' refinedQuery='{}'",
+                                            userId, sessionId, truncate(ctx.query(), 120),
+                                            d.agents(), d.reason(), truncate(d.refinedQuery(), 120));
+                                    eventBus.emit(convId, new AgentStreamEvent.RouteEvent(
+                                            d.agents(), d.reason(), d.refinedQuery()));
+                                })
                                 .flatMap(decision -> runAgents(ctx, decision)
                                         .flatMap(results -> finalAnswer(ctx, decision, results)
                                                 .map(answer -> new RouteAndAnswer(decision, answer))))))
@@ -120,8 +125,13 @@ public class AgentOrchestrator {
         Mono<Void> runner = tracing.wrap("agent.orchestrator.handle.stream", tags,
                 prepareContext(query, convId, userId, sessionId)
                         .flatMap(ctx -> supervisor.route(ctx)
-                                .doOnNext(d -> eventBus.emit(convId, new AgentStreamEvent.RouteEvent(
-                                        d.agents(), d.reason(), d.refinedQuery())))
+                                .doOnNext(d -> {
+                                    log.info("[Pipeline:stream] userId={} sessionId={} query='{}' -> agents={} reason='{}' refinedQuery='{}'",
+                                            userId, sessionId, truncate(ctx.query(), 120),
+                                            d.agents(), d.reason(), truncate(d.refinedQuery(), 120));
+                                    eventBus.emit(convId, new AgentStreamEvent.RouteEvent(
+                                            d.agents(), d.reason(), d.refinedQuery()));
+                                })
                                 .flatMap(decision -> runStreamingAgents(ctx, decision, convId, tokenCount))));
 
         // Kick off the runner; events flow through the bus.
@@ -295,6 +305,11 @@ public class AgentOrchestrator {
 
     private static String asString(Object o) {
         return o == null ? "" : String.valueOf(o);
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
     private static long approxTokens(String s) {

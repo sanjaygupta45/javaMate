@@ -1,5 +1,6 @@
 package com.example.javamate.security;
 
+import com.example.javamate.entity.User;
 import com.example.javamate.service.JwtService;
 import com.example.javamate.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -33,29 +34,21 @@ public class JwtAuthenticationFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        String path = exchange.getRequest().getPath().value();
-
-        // Skip authentication for public endpoints
-        if (isPublicEndpoint(path)) {
-            return chain.filter(exchange);
-        }
-
         if (exchange.getRequest().getMethod() == HttpMethod.OPTIONS) {
             return chain.filter(exchange);
         }
 
         String token = extractToken(exchange.getRequest());
 
+        // No token -> just continue; AuthorizationWebFilter will decide (permit or 401).
         if (!StringUtils.hasText(token)) {
-            // No token: let security chain reject as 401 for protected paths
-            log.debug("No Authorization header on request: {} {}",
-                    exchange.getRequest().getMethod(), path);
             return chain.filter(exchange);
         }
 
+        // Token present but invalid/expired -> reject explicitly with 401.
         if (!jwtService.isTokenValid(token)) {
-            log.warn("Invalid/expired JWT token for request: {} {}",
-                    exchange.getRequest().getMethod(), path);
+            log.warn("Invalid/expired JWT for {} {}", exchange.getRequest().getMethod(),
+                    exchange.getRequest().getPath().value());
             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
             return exchange.getResponse().setComplete();
         }
@@ -63,42 +56,50 @@ public class JwtAuthenticationFilter implements WebFilter {
         Long userId = jwtService.extractUserId(token);
         String email = jwtService.extractEmail(token);
 
-        return userService.findById(userId)
-                .flatMap(user -> {
-                    // Create authentication token
-                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            user,
-                            null,
-                            List.of(new SimpleGrantedAuthority("ROLE_USER"))
-                    );
+        if (userId == null && !StringUtils.hasText(email)) {
+            log.warn("JWT valid but missing identity claims");
+            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+            return exchange.getResponse().setComplete();
+        }
 
-                    log.debug("Authenticated user: {} for path: {}", email, path);
+        // Fallback principal built from token claims, used if DB lookup fails or returns empty.
+        User tokenPrincipal = User.builder()
+                .userId(userId)
+                .email(email)
+                .build();
 
-                    return chain.filter(exchange)
-                            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authToken));
+        Mono<User> resolvedUserMono = (userId != null
+                ? userService.findById(userId)
+                    .switchIfEmpty(Mono.defer(() ->
+                            StringUtils.hasText(email) ? userService.findByEmail(email) : Mono.empty()))
+                : userService.findByEmail(email))
+                .onErrorResume(err -> {
+                    log.warn("User lookup failed (userId={}, email={}): {}", userId, email, err.getMessage());
+                    return Mono.empty();
                 })
-                .switchIfEmpty(Mono.defer(() -> {
-                    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                    return exchange.getResponse().setComplete();
-                }));
+                .defaultIfEmpty(tokenPrincipal);
+
+        return resolvedUserMono.flatMap(user -> {
+            UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                    user,
+                    null,
+                    List.of(new SimpleGrantedAuthority("ROLE_USER"))
+            );
+            log.debug("Authenticated user {} for {}", user.getEmail(),
+                    exchange.getRequest().getPath().value());
+
+            // contextWrite must wrap chain.filter so the downstream AuthorizationWebFilter
+            // (and controllers using ReactiveSecurityContextHolder) can read the auth.
+            return chain.filter(exchange)
+                    .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authToken));
+        });
     }
 
     private String extractToken(ServerHttpRequest request) {
         String bearerToken = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith(BEARER_PREFIX)) {
-            return bearerToken.substring(BEARER_PREFIX.length());
+            return bearerToken.substring(BEARER_PREFIX.length()).trim();
         }
-
         return null;
     }
-
-    private boolean isPublicEndpoint(String path) {
-        return path.contains("/auth/") ||
-                path.contains("/actuator/") ||
-                path.contains("/health") ||
-                path.equals("/mate") ||
-                path.equals("/mate/");
-    }
 }
-
