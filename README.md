@@ -315,11 +315,25 @@ flowchart LR
 
 ## Things I learned doing this
 
-- An "agent" is just an LLM in a loop with tools. Multi-agent is just several of those loops with a router. The framework hype around it is louder than the actual code complexity.
-- Prompts are dependencies. Pulling them into a single `prompts/AgentPrompts.java` file made the agents much easier to tune without grep-hunting.
-- Structured output (`.entity(SomeRecord.class)`) is the single biggest reliability win on top of plain LLM calls. Stop parsing JSON by hand.
-- Per-agent OpenTelemetry spans are not optional once you have more than two LLM calls per request. The first time I saw the trace waterfall, I deleted a redundant retrieval pass I didn't know was happening.
-- Reactive + blocking SDKs is fine as long as every blocking call is on `boundedElastic`. Mix it up and you will eat your event loop without realising, until 4 a.m.
+### Spring AI
+- An "agent" is just an LLM in a loop with tools, and multi-agent is just several of those loops behind a router — Spring AI's `ChatClient` fluent API hides 90% of what you'd otherwise hand-roll.
+- Structured output (`.entity(SomeRecord.class)`) and `@Tool`-annotated methods are the two biggest reliability wins: typed records instead of hand-parsed JSON, and a plain Java method becomes a callable function for the LLM.
+
+### RAG
+- Chunking is the whole game — bad chunk size/overlap silently destroys retrieval quality long before the LLM is the bottleneck, and I tuned chunking far more often than I tuned prompts.
+- Per-user vector isolation has to be a *filter at query time*, not a convention; Qdrant's native payload filter on `userId` turned multi-tenant RAG into a one-liner.
+
+### Memory management
+- Naive "append every turn" memory blows up the context window fast, so auto-summarising old turns into a single `SUMMARY` row keeps the context bounded forever for one extra LLM call per compaction.
+- Backing `ChatMemory` with R2DBC instead of an in-memory map (and scoping every read/write by `userId` + `sessionId`) was the difference between "works on my machine" and "survives a pod restart".
+
+### Streaming responses
+- Streaming over SSE with `Flux<String>` end-to-end (LLM → orchestrator → controller → browser) makes the app *feel* an order of magnitude faster, even though total latency is unchanged.
+- The hard part is keeping the whole pipeline reactive — one `.block()` or blocking JDBC call stalls the stream, so blocking SDKs (PDF, vector ops) must be pushed onto `Schedulers.boundedElastic()`.
+
+### Observability
+- Per-agent OpenTelemetry spans are not optional past two LLM calls per request — the first Tempo waterfall I opened exposed a redundant retrieval pass I didn't even know was running.
+- Tagging spans with `agent.name`, `tool.name`, `tokens.in/out` and `model`, plus trace↔log correlation in Grafana (Prometheus + Tempo + Loki), turns the trace view into a free debugger *and* a cost dashboard.
 
 ---
 
