@@ -1,20 +1,21 @@
 package com.example.javamate.agent.tools;
 
+import com.example.javamate.agent.events.AgentCallContext;
+import com.example.javamate.agent.events.AgentEventBus;
 import com.example.javamate.agent.tracing.AgentTracing;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * Exposes web search as an LLM-callable tool. Spring AI scans the @Tool annotated method
- * and registers it on the ChatClient via .defaultTools(...).
- */
+
 @Component
 public class WebSearchTools {
 
@@ -23,10 +24,12 @@ public class WebSearchTools {
 
     private final WebSearchClient client;
     private final AgentTracing tracing;
+    private final AgentEventBus eventBus;
 
-    public WebSearchTools(WebSearchClient client, AgentTracing tracing) {
+    public WebSearchTools(WebSearchClient client, AgentTracing tracing, AgentEventBus eventBus) {
         this.client = client;
         this.tracing = tracing;
+        this.eventBus = eventBus;
     }
 
     @Tool(description = "Search the public web for up-to-date information: latest library versions, "
@@ -45,6 +48,25 @@ public class WebSearchTools {
                     List<WebSearchClient.SearchResult> results = client.search(query, MAX_RESULTS);
                     int count = results == null ? 0 : results.size();
                     tracing.tag("tool.results.count", count);
+
+                    // Publish a tool event so the UI can render sources / show a "searching the web..." chip.
+                    String convId = AgentCallContext.get();
+                    if (convId != null) {
+                        Map<String, Object> args = new LinkedHashMap<>();
+                        args.put("query", query);
+                        args.put("maxResults", MAX_RESULTS);
+                        List<Map<String, String>> serialised = results == null ? List.of() :
+                                results.stream().map(r -> {
+                                    Map<String, String> m = new LinkedHashMap<>();
+                                    m.put("title", r.title());
+                                    m.put("url", r.url());
+                                    m.put("snippet", r.snippet());
+                                    return m;
+                                }).toList();
+                        eventBus.emit(convId,
+                                new AgentStreamEvent.ToolEvent("webSearch", args, serialised));
+                    }
+
                     if (count == 0) {
                         return "No web results found.";
                     }

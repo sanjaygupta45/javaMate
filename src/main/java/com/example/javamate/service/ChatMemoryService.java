@@ -1,6 +1,7 @@
 package com.example.javamate.service;
 
 import com.example.javamate.dto.ChatSessionDTO;
+import com.example.javamate.dto.ContinueSessionResponseDTO;
 import com.example.javamate.entity.ChatMessage;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -41,4 +42,6 @@ public interface ChatMemoryService {
 
     // Count non-summary messages to check if compaction is needed
     Mono<Long> getNonSummaryMessageCount(Long userId, String sessionId);
+
+    Mono<ContinueSessionResponseDTO> continueFromSession(Long userId, String previousSessionId);
 }

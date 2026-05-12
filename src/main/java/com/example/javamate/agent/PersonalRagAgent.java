@@ -1,7 +1,9 @@
 package com.example.javamate.agent;
 
+import com.example.javamate.agent.events.AgentEventBus;
 import com.example.javamate.agent.prompts.AgentPrompts;
 import com.example.javamate.agent.tracing.AgentTracing;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import com.example.javamate.service.VectorDatabaseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +16,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -31,12 +34,15 @@ public class PersonalRagAgent implements Agent {
     private final ChatClient chat;
     private final VectorDatabaseService vectorDatabaseService;
     private final AgentTracing tracing;
+    private final AgentEventBus eventBus;
 
     public PersonalRagAgent(MistralAiChatModel model,
                             VectorDatabaseService vectorDatabaseService,
-                            AgentTracing tracing) {
+                            AgentTracing tracing,
+                            AgentEventBus eventBus) {
         this.vectorDatabaseService = vectorDatabaseService;
         this.tracing = tracing;
+        this.eventBus = eventBus;
         this.chat = ChatClient.builder(model)
                 .defaultSystem(AgentPrompts.PERSONAL_RAG)
                 .defaultOptions(ChatOptions.builder().temperature(0.2).build())
@@ -82,10 +88,32 @@ public class PersonalRagAgent implements Agent {
                             ctx.query(), SIMILARITY_LIMIT, ctx.userId());
                     tracing.tag("rag.docs.found", docs.size());
                     log.debug("[PersonalRagAgent] retrieved {} chunks for userId={}", docs.size(), ctx.userId());
+
+                    // Emit a tool event so the UI can show citations / "looking in your notes".
+                    List<Map<String, String>> citations = docs.stream()
+                            .map(d -> {
+                                Map<String, String> m = new LinkedHashMap<>();
+                                m.put("documentId", d.getId() == null ? "" : d.getId());
+                                m.put("snippet", snippet(d.getText()));
+                                return m;
+                            })
+                            .toList();
+                    Map<String, Object> args = new LinkedHashMap<>();
+                    args.put("query", ctx.query());
+                    args.put("topK", SIMILARITY_LIMIT);
+                    eventBus.emit(ctx.conversationId(),
+                            new AgentStreamEvent.ToolEvent("personal_rag.retrieve", args, citations));
+
                     String context = docs.isEmpty()
                             ? "(no personal documents matched)"
                             : docs.stream().map(Document::getText).collect(Collectors.joining(CONTEXT_SEPARATOR));
                     return "Question:\n" + ctx.query() + "\n\nContext from the user's personal knowledge base:\n" + context;
                 })).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private static String snippet(String text) {
+        if (text == null) return "";
+        String t = text.replaceAll("\\s+", " ").trim();
+        return t.length() <= 200 ? t : t.substring(0, 200) + "...";
     }
 }

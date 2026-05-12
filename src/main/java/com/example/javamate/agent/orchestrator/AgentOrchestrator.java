@@ -5,8 +5,12 @@ import com.example.javamate.agent.AgentContext;
 import com.example.javamate.agent.AgentName;
 import com.example.javamate.agent.AgentResult;
 import com.example.javamate.agent.SupervisorAgent;
+import com.example.javamate.agent.events.AgentEventBus;
 import com.example.javamate.agent.router.RouteDecision;
 import com.example.javamate.agent.tracing.AgentTracing;
+import com.example.javamate.dto.TextQueryResponseDTO.CitationRef;
+import com.example.javamate.dto.TextQueryResponseDTO.SourceRef;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -18,10 +22,12 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -40,6 +46,12 @@ import java.util.stream.Collectors;
  *      If multiple      -> Supervisor SYNTHESIZES one final answer.
  *   6. Persist the final assistant message (triggers ChatMemory compaction).
  * </pre>
+ *
+ * <p>Throughout the turn the orchestrator publishes typed events on the
+ * {@link AgentEventBus} ({@code route}, {@code tool}, {@code token},
+ * {@code critique}, {@code done}). The streaming endpoint forwards them to the
+ * client as named SSE events; the non-streaming endpoint drains them at the end
+ * to populate {@code sources} / {@code citations} on the response DTO.
  */
 @Component
 public class AgentOrchestrator {
@@ -50,14 +62,17 @@ public class AgentOrchestrator {
     private final Map<AgentName, Agent> agents;
     private final ChatMemory chatMemory;
     private final AgentTracing tracing;
+    private final AgentEventBus eventBus;
 
     public AgentOrchestrator(SupervisorAgent supervisor,
                              List<Agent> agentBeans,
                              ChatMemory chatMemory,
-                             AgentTracing tracing) {
+                             AgentTracing tracing,
+                             AgentEventBus eventBus) {
         this.supervisor = supervisor;
         this.chatMemory = chatMemory;
         this.tracing = tracing;
+        this.eventBus = eventBus;
         this.agents = agentBeans.stream()
                 .collect(Collectors.toMap(Agent::name, Function.identity(),
                         (a, b) -> a, () -> new EnumMap<>(AgentName.class)));
@@ -69,17 +84,41 @@ public class AgentOrchestrator {
     // ---------------------------------------------------------------
 
     public Mono<String> handle(String query, Long userId, String sessionId) {
+        return handleDetailed(query, userId, sessionId).map(OrchestratorResult::answer);
+    }
+
+    /**
+     * Non-streaming variant that also returns the route decision, web sources
+     * and personal-document citations collected during the turn.
+     */
+    public Mono<OrchestratorResult> handleDetailed(String query, Long userId, String sessionId) {
         String convId = conversationId(userId, sessionId);
         Map<String, String> tags = Map.of(
                 "user.id", String.valueOf(userId),
                 "session.id", sessionId,
                 "mode", "non-stream");
-        return tracing.wrap("agent.orchestrator.handle", tags,
+
+        eventBus.register(convId);
+
+        Mono<OrchestratorResult> pipeline = tracing.wrap("agent.orchestrator.handle", tags,
                 prepareContext(query, convId, userId, sessionId)
                         .flatMap(ctx -> supervisor.route(ctx)
+                                .doOnNext(d -> eventBus.emit(convId, new AgentStreamEvent.RouteEvent(
+                                        d.agents(), d.reason(), d.refinedQuery())))
                                 .flatMap(decision -> runAgents(ctx, decision)
-                                        .flatMap(results -> finalAnswer(ctx, decision, results))))
-                        .flatMap(answer -> persistAssistant(convId, answer).thenReturn(answer)));
+                                        .flatMap(results -> finalAnswer(ctx, decision, results)
+                                                .map(answer -> new RouteAndAnswer(decision, answer))))))
+                .flatMap(ra -> persistAssistant(convId, ra.answer())
+                        .thenReturn(buildResultFromBus(convId, ra)));
+
+        return pipeline
+                .doOnSuccess(r -> {
+                    eventBus.emit(convId, new AgentStreamEvent.DoneEvent(
+                            sessionId, r.answer() == null ? 0L : approxTokens(r.answer())));
+                    eventBus.complete(convId);
+                })
+                .doOnError(e -> eventBus.complete(convId))
+                .doOnCancel(() -> eventBus.complete(convId));
     }
 
     public Flux<String> handleStream(String query, Long userId, String sessionId) {
@@ -92,6 +131,40 @@ public class AgentOrchestrator {
                 prepareContext(query, convId, userId, sessionId)
                         .flatMapMany(ctx -> supervisor.route(ctx)
                                 .flatMapMany(decision -> streamAnswer(ctx, decision, convId))));
+    }
+
+    /**
+     * Streaming variant returning typed events ({@code route}, {@code tool},
+     * {@code token}, {@code critique}, {@code done}) instead of raw token strings.
+     * Used by the SSE controller.
+     */
+    public Flux<AgentStreamEvent> handleStreamEvents(String query, Long userId, String sessionId) {
+        String convId = conversationId(userId, sessionId);
+        Map<String, String> tags = Map.of(
+                "user.id", String.valueOf(userId),
+                "session.id", sessionId,
+                "mode", "stream");
+
+        var sink = eventBus.register(convId);
+        AtomicLong tokenCount = new AtomicLong();
+
+        Mono<Void> runner = tracing.wrap("agent.orchestrator.handle.stream", tags,
+                prepareContext(query, convId, userId, sessionId)
+                        .flatMap(ctx -> supervisor.route(ctx)
+                                .doOnNext(d -> eventBus.emit(convId, new AgentStreamEvent.RouteEvent(
+                                        d.agents(), d.reason(), d.refinedQuery())))
+                                .flatMap(decision -> runStreamingAgents(ctx, decision, convId, tokenCount))));
+
+        // Kick off the runner; events flow through the bus.
+        runner
+                .doFinally(sig -> {
+                    eventBus.emit(convId, new AgentStreamEvent.DoneEvent(sessionId, tokenCount.get()));
+                    eventBus.complete(convId);
+                })
+                .subscribe(null,
+                        err -> log.error("[Orchestrator] stream pipeline failed", err));
+
+        return sink.asFlux();
     }
 
     // ---------------------------------------------------------------
@@ -164,6 +237,42 @@ public class AgentOrchestrator {
                                 e -> log.error("[Orchestrator] failed to save assistant message", e)));
     }
 
+    /**
+     * Streaming variant that pushes each token onto the event bus as a
+     * {@link AgentStreamEvent.TokenEvent} and persists the assistant message
+     * at the end. Returns a {@link Mono} that completes when the LLM stream ends.
+     */
+    private Mono<Void> runStreamingAgents(AgentContext ctx, RouteDecision decision,
+                                          String convId, AtomicLong tokenCount) {
+        AgentContext refined = ctx.withQuery(decision.refinedQuery());
+        List<AgentName> chosen = decision.agents();
+
+        Flux<String> tokens;
+        if (chosen.size() == 1) {
+            Agent a = agents.get(chosen.get(0));
+            tokens = (a == null)
+                    ? Flux.just("I couldn't route your question. Please rephrase.")
+                    : a.stream(refined);
+        } else {
+            tokens = Flux.merge(chosen.stream()
+                            .map(agents::get).filter(Objects::nonNull)
+                            .map(a -> a.run(refined)).toList())
+                    .collectList()
+                    .flatMapMany(results -> results.isEmpty()
+                            ? Flux.just("No specialist could answer.")
+                            : supervisor.synthesizeStream(ctx, results));
+        }
+
+        StringBuilder buffer = new StringBuilder();
+        return tokens
+                .doOnNext(t -> {
+                    buffer.append(t);
+                    tokenCount.incrementAndGet();
+                    eventBus.emit(convId, new AgentStreamEvent.TokenEvent(t));
+                })
+                .then(persistAssistant(convId, buffer.toString()));
+    }
+
     // ---------------------------------------------------------------
     // Memory helpers
     // ---------------------------------------------------------------
@@ -176,7 +285,57 @@ public class AgentOrchestrator {
                 .then();
     }
 
+    // ---------------------------------------------------------------
+    // Result building (drain the event bus into a DTO-friendly shape)
+    // ---------------------------------------------------------------
+
+    /** Drains in-memory bus events to extract sources & citations. */
+    private OrchestratorResult buildResultFromBus(String convId, RouteAndAnswer ra) {
+        List<SourceRef> sources = new ArrayList<>();
+        List<CitationRef> citations = new ArrayList<>();
+        List<AgentStreamEvent> events = eventBus.snapshot(convId);
+        for (AgentStreamEvent ev : events) {
+            if (ev instanceof AgentStreamEvent.ToolEvent te) {
+                if ("webSearch".equals(te.name()) && te.results() instanceof List<?> list) {
+                    for (Object o : list) {
+                        if (o instanceof Map<?, ?> m) {
+                            sources.add(new SourceRef(
+                                    asString(m.get("title")),
+                                    asString(m.get("url")),
+                                    asString(m.get("snippet"))));
+                        }
+                    }
+                } else if ("personal_rag.retrieve".equals(te.name()) && te.results() instanceof List<?> list) {
+                    for (Object o : list) {
+                        if (o instanceof Map<?, ?> m) {
+                            citations.add(new CitationRef(
+                                    asString(m.get("documentId")),
+                                    asString(m.get("snippet"))));
+                        }
+                    }
+                }
+            }
+        }
+        return new OrchestratorResult(
+                ra.answer(),
+                ra.decision().agents(),
+                ra.decision().reason(),
+                sources,
+                citations);
+    }
+
+    private static String asString(Object o) {
+        return o == null ? "" : String.valueOf(o);
+    }
+
+    private static long approxTokens(String s) {
+        // Rough heuristic: ~4 chars per token. Cheap and good enough for telemetry.
+        return s == null ? 0L : Math.max(1, s.length() / 4);
+    }
+
     private static String conversationId(Long userId, String sessionId) {
         return userId + ":" + sessionId;
     }
+
+    private record RouteAndAnswer(RouteDecision decision, String answer) {}
 }

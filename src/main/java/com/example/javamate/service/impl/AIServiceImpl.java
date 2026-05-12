@@ -1,6 +1,8 @@
 package com.example.javamate.service.impl;
 
 import com.example.javamate.agent.orchestrator.AgentOrchestrator;
+import com.example.javamate.agent.orchestrator.OrchestratorResult;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import com.example.javamate.service.AIService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -31,8 +33,20 @@ public class AIServiceImpl implements AIService {
     }
 
     @Override
+    public Mono<OrchestratorResult> generateDetailedResponse(String userQuery, Long userId, String sessionId) {
+        log.debug("[AIService] non-streaming (detailed) userId={} session={}", userId, sessionId);
+        return orchestrator.handleDetailed(userQuery, userId, sessionId);
+    }
+
+    @Override
     public Flux<String> generateStreamingResponse(String userQuery, Long userId, String sessionId) {
         log.debug("[AIService] streaming request userId={} session={}", userId, sessionId);
         return orchestrator.handleStream(userQuery, userId, sessionId);
+    }
+
+    @Override
+    public Flux<AgentStreamEvent> generateStreamingEvents(String userQuery, Long userId, String sessionId) {
+        log.debug("[AIService] streaming (typed events) userId={} session={}", userId, sessionId);
+        return orchestrator.handleStreamEvents(userQuery, userId, sessionId);
     }
 }

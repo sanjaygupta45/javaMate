@@ -1,5 +1,6 @@
 package com.example.javamate.agent;
 
+import com.example.javamate.agent.events.AgentCallContext;
 import com.example.javamate.agent.prompts.AgentPrompts;
 import com.example.javamate.agent.tools.WebSearchTools;
 import com.example.javamate.agent.tracing.AgentTracing;
@@ -43,7 +44,14 @@ public class WebSearchAgent implements Agent {
                 "agent.name", "WEB_SEARCH",
                 "agent.input.chars", String.valueOf(ctx.query().length()));
         return tracing.wrap("agent.web_search", tags,
-                Mono.fromCallable(() -> chat.prompt().user(ctx.query()).call().content())
+                Mono.fromCallable(() -> {
+                            AgentCallContext.set(ctx.conversationId());
+                            try {
+                                return chat.prompt().user(ctx.query()).call().content();
+                            } finally {
+                                AgentCallContext.clear();
+                            }
+                        })
                         .subscribeOn(Schedulers.boundedElastic())
                         .map(answer -> {
                             tracing.tag("agent.output.chars", answer == null ? 0 : answer.length());

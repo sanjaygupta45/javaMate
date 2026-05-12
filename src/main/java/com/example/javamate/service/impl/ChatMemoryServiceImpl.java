@@ -1,9 +1,11 @@
 package com.example.javamate.service.impl;
 
 import com.example.javamate.dto.ChatSessionDTO;
+import com.example.javamate.dto.ContinueSessionResponseDTO;
 import com.example.javamate.entity.ChatMessage;
 import com.example.javamate.repository.ChatMessageRepository;
 import com.example.javamate.service.ChatMemoryService;
+import com.example.javamate.service.ConversationSummarizer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,7 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
     private static final String ROLE_SUMMARY = "SUMMARY"; // Role for storing compacted conversation summaries
 
     private final ChatMessageRepository chatMessageRepository;
+    private final ConversationSummarizer conversationSummarizer;
 
     @Value("${javamate.chat.memory.default-window-size:20}")
     private int defaultWindowSize;
@@ -154,5 +157,32 @@ public class ChatMemoryServiceImpl implements ChatMemoryService {
     public Mono<Long> getNonSummaryMessageCount(Long userId, String sessionId) {
         // Count messages excluding SUMMARY role to determine if compaction is needed
         return chatMessageRepository.countNonSummaryMessages(userId, sessionId);
+    }
+
+    @Override
+    public Mono<ContinueSessionResponseDTO> continueFromSession(Long userId, String previousSessionId) {
+        if (previousSessionId == null || previousSessionId.isBlank()) {
+            return Mono.error(new IllegalArgumentException("previousSessionId is required"));
+        }
+
+        return getSessionMessages(userId, previousSessionId)
+                .collectList()
+                .flatMap(messages -> {
+                    if (messages.isEmpty()) {
+                        return Mono.error(new IllegalArgumentException(
+                                "Session '" + previousSessionId + "' is empty or not owned by this user."));
+                    }
+                    String newSessionId = generateSessionId();
+                    return conversationSummarizer.summarise(messages)
+                            .flatMap(summary -> saveSummaryMessage(userId, newSessionId, summary)
+                                    .thenReturn(ContinueSessionResponseDTO.builder()
+                                            .sessionId(newSessionId)
+                                            .previousSessionId(previousSessionId)
+                                            .summary(summary)
+                                            .build()))
+                            .doOnSuccess(r -> logger.info(
+                                    "Continued user={} from session={} -> new session={}",
+                                    userId, previousSessionId, r.getSessionId()));
+                });
     }
 }

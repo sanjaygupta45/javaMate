@@ -2,10 +2,14 @@ package com.example.javamate.controller;
 
 import com.example.javamate.dto.ChatMessageDTO;
 import com.example.javamate.dto.ChatSessionDTO;
+import com.example.javamate.dto.ContinueSessionRequestDTO;
+import com.example.javamate.dto.ContinueSessionResponseDTO;
 import com.example.javamate.dto.ResponseDTO;
 import com.example.javamate.security.AuthenticatedUserContext;
 import com.example.javamate.service.ChatMemoryService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
@@ -93,5 +97,14 @@ public class ChatSessionController {
             return ResponseEntity.ok(session);
         });
     }
-}
 
+    @PostMapping(value = "/continue",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public Mono<ResponseEntity<ContinueSessionResponseDTO>> continueSession(
+            @Valid @RequestBody ContinueSessionRequestDTO request) {
+        return authContext.getCurrentUserId()
+                .flatMap(userId -> chatMemoryService.continueFromSession(userId, request.getPreviousSessionId()))
+                .map(ResponseEntity::ok);
+    }
+}

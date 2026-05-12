@@ -1,8 +1,8 @@
 package com.example.javamate.controller;
 
-import com.example.javamate.dto.ChatChunk;
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import com.example.javamate.security.AuthenticatedUserContext;
 import com.example.javamate.service.JavaMateService;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +25,7 @@ public class JavaMateController {
     private final AuthenticatedUserContext authContext;
 
 
-     // Non-streaming endpoint - returns complete response
+    // Non-streaming endpoint - returns complete response
     @PostMapping(
             value = "/text",
             consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -37,26 +37,26 @@ public class JavaMateController {
         return authContext.getCurrentUserId()
                 .flatMap(userId -> javaMateService.processTextQuery(requestDTO, userId))
                 .map(response -> {
-                    HttpStatus status = OK.equals(response.getResponseStatus()) 
-                            ? HttpStatus.OK 
+                    HttpStatus status = OK.equals(response.getResponseStatus())
+                            ? HttpStatus.OK
                             : HttpStatus.BAD_REQUEST;
                     return ResponseEntity.status(status).body(response);
                 });
     }
 
 
-    // streaming endpoints return Server-Sent events stream for real time experience
-    // Using ChatChunk wrapper to preserve whitespace in JSON format
+
     @PostMapping(
             value = "/stream",
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
-    public Flux<ServerSentEvent<ChatChunk>> askTextStream(@RequestBody TextQueryRequestDTO requestDTO) {
+    public Flux<ServerSentEvent<AgentStreamEvent>> askTextStream(@RequestBody TextQueryRequestDTO requestDTO) {
         return authContext.getCurrentUserId()
-                .flatMapMany(userId -> javaMateService.processTextQueryStream(requestDTO, userId))
-                .map(chunk -> ServerSentEvent.<ChatChunk>builder()
-                        .data(new ChatChunk(chunk))
+                .flatMapMany(userId -> javaMateService.processTextQueryStreamEvents(requestDTO, userId))
+                .map(event -> ServerSentEvent.<AgentStreamEvent>builder()
+                        .event(event.type())
+                        .data(event)
                         .build());
     }
 }

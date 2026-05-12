@@ -2,6 +2,7 @@ package com.example.javamate.service;
 
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -12,7 +13,7 @@ public interface JavaMateService {
     Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO, Long userId);
 
 
+    Flux<AgentStreamEvent> processTextQueryStreamEvents(TextQueryRequestDTO textQueryRequestDTO, Long userId);
+
     String resolveSessionId(TextQueryRequestDTO requestDTO);
 }
-
-

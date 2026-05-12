@@ -1,7 +1,9 @@
 package com.example.javamate.service.impl;
 
+import com.example.javamate.agent.AgentName;
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
+import com.example.javamate.dto.stream.AgentStreamEvent;
 import com.example.javamate.exception.SessionLimitExceededException;
 import com.example.javamate.service.AIService;
 import com.example.javamate.service.ChatMemoryService;
@@ -42,9 +44,9 @@ public class JavaMateServiceImpl implements JavaMateService {
     @Override
     public Mono<TextQueryResponseDTO> processTextQuery(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
 
-        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null || 
+        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null ||
             textQueryRequestDTO.getQuery().isBlank()) {
-            
+
             TextQueryResponseDTO errorResponse = new TextQueryResponseDTO();
             errorResponse.setResponseStatus(NOT_OK);
             errorResponse.setMessages(List.of(QUERY_EMPTY));
@@ -54,16 +56,20 @@ public class JavaMateServiceImpl implements JavaMateService {
         String sessionId = resolveSessionId(textQueryRequestDTO);
         String userQuery = textQueryRequestDTO.getQuery();
 
-        // Check session limit before processing
-        // Spring AI's MessageChatMemoryAdvisor will handle saving messages
         return checkSessionLimit(userId, sessionId)
-                .then(aiService.generateResponse(userQuery, userId, sessionId))
-                .map(response -> {
+                .then(aiService.generateDetailedResponse(userQuery, userId, sessionId))
+                .map(detailed -> {
                     TextQueryResponseDTO responseDTO = new TextQueryResponseDTO();
-                    responseDTO.setChatResponse(response);
+                    responseDTO.setChatResponse(detailed.answer());
                     responseDTO.setSessionId(sessionId);
                     responseDTO.setResponseStatus(OK);
                     responseDTO.setMessages(List.of(QUERY_SUCCESS));
+                    // Multi-agent metadata
+                    responseDTO.setAgents(detailed.agents() == null ? List.of()
+                            : detailed.agents().stream().map(AgentName::name).toList());
+                    responseDTO.setRouteReason(detailed.routeReason());
+                    responseDTO.setSources(detailed.sources());
+                    responseDTO.setCitations(detailed.citations());
                     return responseDTO;
                 })
                 .onErrorResume(SessionLimitExceededException.class, error -> {
@@ -87,7 +93,7 @@ public class JavaMateServiceImpl implements JavaMateService {
     @Override
     public Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
 
-        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null || 
+        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null ||
             textQueryRequestDTO.getQuery().isBlank()) {
             return Flux.error(new IllegalArgumentException(QUERY_EMPTY));
         }
@@ -95,8 +101,6 @@ public class JavaMateServiceImpl implements JavaMateService {
         String sessionId = resolveSessionId(textQueryRequestDTO);
         String userQuery = textQueryRequestDTO.getQuery();
 
-        // Check session limit, then stream response
-        // Spring AI's MessageChatMemoryAdvisor will handle saving messages
         return checkSessionLimit(userId, sessionId)
                 .thenMany(aiService.generateStreamingResponse(userQuery, userId, sessionId))
                 .onErrorResume(error -> {
@@ -105,9 +109,27 @@ public class JavaMateServiceImpl implements JavaMateService {
                 });
     }
 
-    /**
-     * Check if session has reached the user message limit.
-     */
+    @Override
+    public Flux<AgentStreamEvent> processTextQueryStreamEvents(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
+
+        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null ||
+            textQueryRequestDTO.getQuery().isBlank()) {
+            return Flux.error(new IllegalArgumentException(QUERY_EMPTY));
+        }
+
+        String sessionId = resolveSessionId(textQueryRequestDTO);
+        String userQuery = textQueryRequestDTO.getQuery();
+
+        return checkSessionLimit(userId, sessionId)
+                .thenMany(aiService.generateStreamingEvents(userQuery, userId, sessionId))
+                .onErrorResume(error -> {
+                    logger.error("Error streaming events: {}", error.getMessage());
+                    return Flux.error(error);
+                });
+    }
+
+
+    //Check if session has reached the user message limit.
     private Mono<Void> checkSessionLimit(Long userId, String sessionId) {
         return chatMemoryService.isSessionLimitReached(userId, sessionId)
                 .flatMap(limitReached -> {
@@ -127,3 +149,4 @@ public class JavaMateServiceImpl implements JavaMateService {
         return chatMemoryService.generateSessionId();
     }
 }
+
