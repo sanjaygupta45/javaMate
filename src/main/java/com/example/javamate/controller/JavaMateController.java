@@ -2,7 +2,7 @@ package com.example.javamate.controller;
 
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import com.example.javamate.security.AuthenticatedUserContext;
 import com.example.javamate.service.JavaMateService;
 import lombok.RequiredArgsConstructor;

@@ -1,8 +1,8 @@
 package com.example.javamate.service.impl;
 
 import com.example.javamate.agent.orchestrator.AgentOrchestrator;
-import com.example.javamate.agent.orchestrator.OrchestratorResult;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.dto.OrchestratorResult;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import com.example.javamate.service.AIService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;

@@ -11,15 +11,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-/**
- * Thin facade over Micrometer Tracing so every agent / tool emits a span without
- * each one having to know about the Tracer API.
- *
- * <p>Spans are visible in Grafana Tempo via the OTLP exporter already configured
- * in {@code application.properties}.
- *
- * <p>If tracing is not configured (e.g. in a unit test), all methods become no-ops.
- */
+
 @Component
 public class AgentTracing {
 

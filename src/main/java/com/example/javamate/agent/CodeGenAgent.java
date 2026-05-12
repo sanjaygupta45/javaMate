@@ -5,7 +5,7 @@ import com.example.javamate.agent.critic.CritiqueResult;
 import com.example.javamate.agent.events.AgentEventBus;
 import com.example.javamate.agent.prompts.AgentPrompts;
 import com.example.javamate.agent.tracing.AgentTracing;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -18,21 +18,7 @@ import reactor.core.scheduler.Schedulers;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Generates non-trivial code using a reflection (drafter -> critic -> reviser) loop.
- *
- * <p>Algorithm:
- * <pre>
- *   draft = codeGen(query)
- *   for i in 1..MAX_ITER:
- *       critique = critic(query, draft)
- *       if critique.approved -> break
- *       draft = codeGen(query, draft, critique)   // revise
- *   return draft
- * </pre>
- *
- * <p>Self-contained: from the orchestrator's perspective this is just another {@link Agent}.
- */
+
 @Component
 public class CodeGenAgent implements Agent {
 

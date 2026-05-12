@@ -1,6 +1,6 @@
 package com.example.javamate.agent.events;
 
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -22,7 +22,6 @@ public class AgentEventBus {
 
     private final Map<String, Sinks.Many<AgentStreamEvent>> sinks = new ConcurrentHashMap<>();
 
-    /** Mirror of every emitted event so non-streaming consumers can read synchronously. */
     private final Map<String, Queue<AgentStreamEvent>> snapshots = new ConcurrentHashMap<>();
 
 

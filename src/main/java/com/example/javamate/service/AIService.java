@@ -1,7 +1,7 @@
 package com.example.javamate.service;
 
-import com.example.javamate.agent.orchestrator.OrchestratorResult;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.dto.OrchestratorResult;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 

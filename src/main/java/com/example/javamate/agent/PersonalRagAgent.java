@@ -3,7 +3,7 @@ package com.example.javamate.agent;
 import com.example.javamate.agent.events.AgentEventBus;
 import com.example.javamate.agent.prompts.AgentPrompts;
 import com.example.javamate.agent.tracing.AgentTracing;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import com.example.javamate.service.VectorDatabaseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * Answers using the user's personal uploaded documents (RAG over Qdrant).
- */
+
 @Component
 public class PersonalRagAgent implements Agent {
 

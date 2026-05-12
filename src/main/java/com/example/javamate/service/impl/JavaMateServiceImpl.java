@@ -3,7 +3,7 @@ package com.example.javamate.service.impl;
 import com.example.javamate.agent.AgentName;
 import com.example.javamate.dto.TextQueryRequestDTO;
 import com.example.javamate.dto.TextQueryResponseDTO;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import com.example.javamate.exception.SessionLimitExceededException;
 import com.example.javamate.service.AIService;
 import com.example.javamate.service.ChatMemoryService;

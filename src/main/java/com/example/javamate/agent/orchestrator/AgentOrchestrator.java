@@ -6,11 +6,12 @@ import com.example.javamate.agent.AgentName;
 import com.example.javamate.agent.AgentResult;
 import com.example.javamate.agent.SupervisorAgent;
 import com.example.javamate.agent.events.AgentEventBus;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import com.example.javamate.agent.router.RouteDecision;
 import com.example.javamate.agent.tracing.AgentTracing;
+import com.example.javamate.dto.OrchestratorResult;
 import com.example.javamate.dto.TextQueryResponseDTO.CitationRef;
 import com.example.javamate.dto.TextQueryResponseDTO.SourceRef;
-import com.example.javamate.dto.stream.AgentStreamEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -31,28 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * Entry point of the multi-agent system. Wraps the whole turn in an
- * "agent.orchestrator.handle" span for end-to-end Tempo traces.
- *
- * <p>Pipeline per user turn:
- * <pre>
- *   1. Read recent chat history from ChatMemory (for routing context).
- *   2. Persist the raw user message.
- *   3. Ask Supervisor to ROUTE -> RouteDecision (1 or 2 agents).
- *   4. Run selected agents in PARALLEL (blocking calls on boundedElastic).
- *      - CODE_GEN internally runs a critic-revise reflection loop.
- *   5. If single agent  -> use its answer directly.
- *      If multiple      -> Supervisor SYNTHESIZES one final answer.
- *   6. Persist the final assistant message (triggers ChatMemory compaction).
- * </pre>
- *
- * <p>Throughout the turn the orchestrator publishes typed events on the
- * {@link AgentEventBus} ({@code route}, {@code tool}, {@code token},
- * {@code critique}, {@code done}). The streaming endpoint forwards them to the
- * client as named SSE events; the non-streaming endpoint drains them at the end
- * to populate {@code sources} / {@code citations} on the response DTO.
- */
+
 @Component
 public class AgentOrchestrator {
 
@@ -79,18 +59,11 @@ public class AgentOrchestrator {
         log.info("AgentOrchestrator initialized with agents: {}", this.agents.keySet());
     }
 
-    // ---------------------------------------------------------------
-    // Public API
-    // ---------------------------------------------------------------
-
     public Mono<String> handle(String query, Long userId, String sessionId) {
         return handleDetailed(query, userId, sessionId).map(OrchestratorResult::answer);
     }
 
-    /**
-     * Non-streaming variant that also returns the route decision, web sources
-     * and personal-document citations collected during the turn.
-     */
+
     public Mono<OrchestratorResult> handleDetailed(String query, Long userId, String sessionId) {
         String convId = conversationId(userId, sessionId);
         Map<String, String> tags = Map.of(
@@ -133,11 +106,7 @@ public class AgentOrchestrator {
                                 .flatMapMany(decision -> streamAnswer(ctx, decision, convId))));
     }
 
-    /**
-     * Streaming variant returning typed events ({@code route}, {@code tool},
-     * {@code token}, {@code critique}, {@code done}) instead of raw token strings.
-     * Used by the SSE controller.
-     */
+
     public Flux<AgentStreamEvent> handleStreamEvents(String query, Long userId, String sessionId) {
         String convId = conversationId(userId, sessionId);
         Map<String, String> tags = Map.of(

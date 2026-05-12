@@ -14,10 +14,7 @@ import reactor.core.scheduler.Schedulers;
 
 import java.util.Map;
 
-/**
- * Answers questions that need fresh / live information. Owns the web-search tool.
- * Spring AI auto-loops between the LLM and the @Tool method until the LLM emits a final answer.
- */
+
 @Component
 public class WebSearchAgent implements Agent {
 

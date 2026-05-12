@@ -1,13 +1,7 @@
 package com.example.javamate.agent;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-/**
- * Common contract every specialist agent in JavaMate implements.
- *
- * <p>Agents are stateless — they do not write to chat memory.
- * The AgentOrchestrator owns memory persistence so the user always sees
- * one coherent assistant message per turn.
- */
+
 public interface Agent {
     AgentName name();
     Mono<AgentResult> run(AgentContext ctx);

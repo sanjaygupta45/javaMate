@@ -1,4 +1,4 @@
-package com.example.javamate.dto.stream;
+package com.example.javamate.agent.events;
 
 import com.example.javamate.agent.AgentName;
 

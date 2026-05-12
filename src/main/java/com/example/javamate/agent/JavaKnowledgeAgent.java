@@ -12,9 +12,7 @@ import reactor.core.scheduler.Schedulers;
 
 import java.util.Map;
 
-/**
- * Pure-LLM Java/Spring/JVM expert. No external data, no tools.
- */
+
 @Component
 public class JavaKnowledgeAgent implements Agent {
 

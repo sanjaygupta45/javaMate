@@ -3,7 +3,7 @@ package com.example.javamate.agent.tools;
 import com.example.javamate.agent.events.AgentCallContext;
 import com.example.javamate.agent.events.AgentEventBus;
 import com.example.javamate.agent.tracing.AgentTracing;
-import com.example.javamate.dto.stream.AgentStreamEvent;
+import com.example.javamate.agent.events.AgentStreamEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
