@@ -161,9 +161,13 @@ public class AgentOrchestrator {
         if (ev instanceof AgentStreamEvent.RouteEvent) {
             return false;
         }
-        if (ev instanceof AgentStreamEvent.ToolEvent te) {
-            // Whitelist: only webSearch tool events are exposed to clients.
-            return "webSearch".equals(te.name());
+        // ToolEvents (e.g. webSearch calls) are server-side only. Citations
+        // sourced from webSearch are still surfaced to the client through the
+        // non-streaming /chat/text response (TextQueryResponseDTO.citations),
+        // which is built by draining the event bus on the server. We do not
+        // want to render a "Tools: webSearch" indicator in the SSE UI.
+        if (ev instanceof AgentStreamEvent.ToolEvent) {
+            return false;
         }
         return true;
     }
