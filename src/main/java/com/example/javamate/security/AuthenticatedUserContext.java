@@ -25,10 +25,5 @@ public class AuthenticatedUserContext {
     public Mono<Long> getCurrentUserId() {
         return getCurrentUser().map(User::getUserId);
     }
-
-
-    public Mono<String> getCurrentUserEmail() {
-        return getCurrentUser().map(User::getEmail);
-    }
 }
 

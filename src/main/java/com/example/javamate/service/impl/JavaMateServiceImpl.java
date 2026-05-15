@@ -132,24 +132,6 @@ public class JavaMateServiceImpl implements JavaMateService {
             return responseDTO;
             }
 
-    @Override
-    public Flux<String> processTextQueryStream(TextQueryRequestDTO textQueryRequestDTO, Long userId) {
-
-        if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null ||
-            textQueryRequestDTO.getQuery().isBlank()) {
-            return Flux.error(new IllegalArgumentException(QUERY_EMPTY));
-        }
-
-        String sessionId = resolveSessionId(textQueryRequestDTO);
-        String userQuery = textQueryRequestDTO.getQuery();
-
-        return checkSessionLimit(userId, sessionId)
-                .thenMany(aiService.generateStreamingResponse(userQuery, userId, sessionId))
-                .onErrorResume(error -> {
-                    logger.error("Error streaming response: {}", error.getMessage());
-                    return Flux.error(error);
-                });
-    }
 
     @Override
     public Flux<AgentStreamEvent> processTextQueryStreamEvents(TextQueryRequestDTO textQueryRequestDTO, Long userId) {

@@ -33,10 +33,6 @@ public class AgentEventBus {
     }
 
 
-    public Flux<AgentStreamEvent> stream(String conversationId) {
-        Sinks.Many<AgentStreamEvent> s = sinks.get(conversationId);
-        return s == null ? Flux.empty() : s.asFlux();
-    }
 
     public List<AgentStreamEvent> snapshot(String conversationId) {
         Queue<AgentStreamEvent> q = snapshots.get(conversationId);

@@ -17,7 +17,6 @@ public interface ChatSessionRepository extends ReactiveCrudRepository<ChatSessio
 
     Mono<ChatSession> findBySessionIdAndUserId(String sessionId, Long userId);
 
-    Mono<Boolean> existsBySessionIdAndUserId(String sessionId, Long userId);
 
     Mono<Void> deleteBySessionIdAndUserId(String sessionId, Long userId);
 

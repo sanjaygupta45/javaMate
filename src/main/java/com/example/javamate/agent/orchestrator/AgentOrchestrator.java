@@ -104,18 +104,6 @@ public class AgentOrchestrator {
                 .doOnCancel(() -> eventBus.complete(convId));
     }
 
-    public Flux<String> handleStream(String query, Long userId, String sessionId) {
-        String convId = conversationId(userId, sessionId);
-        Map<String, String> tags = Map.of(
-                "user.id", String.valueOf(userId),
-                "session.id", sessionId,
-                "mode", "stream");
-        return tracing.wrap("agent.orchestrator.handle.stream", tags,
-                prepareContext(query, convId, userId, sessionId)
-                        .flatMapMany(ctx -> supervisor.route(ctx)
-                                .flatMapMany(decision -> streamAnswer(ctx, decision, convId))));
-    }
-
 
     public Flux<AgentStreamEvent> handleStreamEvents(String query, Long userId, String sessionId) {
         String convId = conversationId(userId, sessionId);
@@ -168,6 +156,11 @@ public class AgentOrchestrator {
     }
 
     private static boolean isClientVisible(AgentStreamEvent ev) {
+        // RouteEvent is server-side only (logged + used for tracing). Do not
+        // leak routing decisions / refined query / route reason to the client.
+        if (ev instanceof AgentStreamEvent.RouteEvent) {
+            return false;
+        }
         if (ev instanceof AgentStreamEvent.ToolEvent te) {
             // Whitelist: only webSearch tool events are exposed to clients.
             return "webSearch".equals(te.name());
@@ -237,35 +230,6 @@ public class AgentOrchestrator {
         return supervisor.synthesize(ctx, results);
     }
 
-    private Flux<String> streamAnswer(AgentContext ctx, RouteDecision decision, String convId) {
-        AgentContext refined = ctx.withQuery(decision.refinedQuery());
-        List<AgentName> chosen = decision.agents();
-
-        Flux<String> tokens;
-        if (chosen.size() == 1) {
-            Agent a = agents.get(chosen.get(0));
-            if (a == null) {
-                tokens = Flux.just("I couldn't route your question. Please rephrase.");
-            } else {
-                tokens = a.stream(refined);
-            }
-        } else {
-            tokens = Flux.merge(chosen.stream()
-                            .map(agents::get).filter(Objects::nonNull)
-                            .map(a -> a.run(refined)).toList())
-                    .collectList()
-                    .flatMapMany(results -> results.isEmpty()
-                            ? Flux.just("No specialist could answer.")
-                            : supervisor.synthesizeStream(ctx, results));
-        }
-
-        StringBuilder buffer = new StringBuilder();
-        return tokens
-                .doOnNext(buffer::append)
-                .doOnComplete(() -> persistAssistant(convId, buffer.toString())
-                        .subscribe(null,
-                                e -> log.error("[Orchestrator] failed to save assistant message", e)));
-    }
 
     /**
      * Streaming variant that pushes each token onto the event bus as a

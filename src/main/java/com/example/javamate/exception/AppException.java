@@ -33,17 +33,5 @@ public class AppException extends RuntimeException {
     public static AppException unauthorized(String message) {
         return new AppException(message, HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
     }
-
-    public static AppException badRequest(String message) {
-        return new AppException(message, HttpStatus.BAD_REQUEST, "BAD_REQUEST");
-    }
-
-    public static AppException forbidden(String message) {
-        return new AppException(message, HttpStatus.FORBIDDEN, "FORBIDDEN");
-    }
-
-    public static AppException internalError(String message) {
-        return new AppException(message, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR");
-    }
 }
 

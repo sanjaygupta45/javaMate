@@ -20,16 +20,9 @@ public interface ChatMessageRepository extends ReactiveCrudRepository<ChatMessag
 
     Mono<Void> deleteByUserId(Long userId);
 
-    @Query("SELECT DISTINCT session_id FROM chat_messages WHERE user_id = :userId")
-    Flux<String> findDistinctSessionIdsByUserId(Long userId);
-
-    Mono<Long> countByUserIdAndSessionId(Long userId, String sessionId);
-
     @Query("SELECT COUNT(*) FROM chat_messages WHERE user_id = :userId AND session_id = :sessionId AND role = 'USER'")
     Mono<Long> countUserMessagesByUserIdAndSessionId(Long userId, String sessionId);
 
-    @Query("SELECT * FROM chat_messages WHERE user_id = :userId AND session_id = :sessionId ORDER BY created_at DESC LIMIT 1")
-    Mono<ChatMessage> findLatestMessageInSession(Long userId, String sessionId);
 
     // Find oldest N messages (excluding SUMMARY role) for compaction
     @Query("SELECT * FROM chat_messages WHERE user_id = :userId AND session_id = :sessionId AND role != 'SUMMARY' ORDER BY created_at ASC LIMIT :limit")
