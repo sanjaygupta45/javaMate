@@ -81,10 +81,12 @@ public class JavaMateServiceImpl implements JavaMateService {
                     responseDTO.setSessionTitle(session.getTitle());
                     responseDTO.setResponseStatus(OK);
                     responseDTO.setMessages(List.of(QUERY_SUCCESS));
-                    // Only expose web-search sources/citations to the client.
-                    // Agent pipeline metadata (agents, routeReason) and personal-RAG
-                    // citations are kept server-side only.
+                    // Expose web-search artifacts only:
+                    //  - sources    : URL refs from the web-search agent
+                    //  - citations  : inline citation refs from the web-search agent
+                    // Personal-RAG retrievals are intentionally kept server-side.
                     responseDTO.setSources(detailed.sources());
+                    responseDTO.setCitations(detailed.citations());
                     return responseDTO;
                 })
                         .defaultIfEmpty(buildResponseWithoutSessionTitle(detailed, sessionId, userId)))
@@ -126,6 +128,7 @@ public class JavaMateServiceImpl implements JavaMateService {
             responseDTO.setResponseStatus(OK);
             responseDTO.setMessages(List.of(QUERY_SUCCESS));
             responseDTO.setSources(detailed.sources());
+            responseDTO.setCitations(detailed.citations());
             return responseDTO;
             }
 
@@ -153,7 +156,7 @@ public class JavaMateServiceImpl implements JavaMateService {
 
         if (textQueryRequestDTO == null || textQueryRequestDTO.getQuery() == null ||
             textQueryRequestDTO.getQuery().isBlank()) {
-            return Flux.error(new IllegalArgumentException(QUERY_EMPTY));
+            return Flux.just(new AgentStreamEvent.ErrorEvent("BAD_REQUEST", QUERY_EMPTY));
         }
 
         String sessionId = resolveSessionId(textQueryRequestDTO);
@@ -161,9 +164,16 @@ public class JavaMateServiceImpl implements JavaMateService {
 
         return checkSessionLimit(userId, sessionId)
                 .thenMany(aiService.generateStreamingEvents(userQuery, userId, sessionId))
+                .onErrorResume(SessionLimitExceededException.class, error -> {
+                    logger.warn("Session limit exceeded for session {}: {}", sessionId, error.getMessage());
+                    return Flux.just(new AgentStreamEvent.ErrorEvent(
+                            "SESSION_LIMIT_EXCEEDED", error.getMessage()));
+                })
                 .onErrorResume(error -> {
                     logger.error("Error streaming events: {}", error.getMessage());
-                    return Flux.error(error);
+                    return Flux.just(new AgentStreamEvent.ErrorEvent(
+                            "INTERNAL_ERROR",
+                            error.getMessage() == null ? "Error streaming events" : error.getMessage()));
                 });
     }
 

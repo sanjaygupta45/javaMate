@@ -12,6 +12,8 @@ import com.example.javamate.agent.tracing.AgentTracing;
 import com.example.javamate.dto.OrchestratorResult;
 import com.example.javamate.dto.TextQueryResponseDTO.CitationRef;
 import com.example.javamate.dto.TextQueryResponseDTO.SourceRef;
+import com.example.javamate.exception.SessionLimitExceededException;
+import com.example.javamate.service.ChatSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -43,16 +45,19 @@ public class AgentOrchestrator {
     private final ChatMemory chatMemory;
     private final AgentTracing tracing;
     private final AgentEventBus eventBus;
+    private final ChatSessionService chatSessionService;
 
     public AgentOrchestrator(SupervisorAgent supervisor,
                              List<Agent> agentBeans,
                              ChatMemory chatMemory,
                              AgentTracing tracing,
-                             AgentEventBus eventBus) {
+                             AgentEventBus eventBus,
+                             ChatSessionService chatSessionService) {
         this.supervisor = supervisor;
         this.chatMemory = chatMemory;
         this.tracing = tracing;
         this.eventBus = eventBus;
+        this.chatSessionService = chatSessionService;
         this.agents = agentBeans.stream()
                 .collect(Collectors.toMap(Agent::name, Function.identity(),
                         (a, b) -> a, () -> new EnumMap<>(AgentName.class)));
@@ -121,9 +126,15 @@ public class AgentOrchestrator {
 
         var sink = eventBus.register(convId);
         AtomicLong tokenCount = new AtomicLong();
+        java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         Mono<Void> runner = tracing.wrap("agent.orchestrator.handle.stream", tags,
                 prepareContext(query, convId, userId, sessionId)
+                        // After the user message has been persisted (inside prepareContext ->
+                        // chatMemory.add -> ChatMemoryServiceImpl.saveMessage), the session row
+                        // and its derived title are guaranteed to exist. Emit a SessionEvent so
+                        // the SSE client can render the conversation title immediately.
+                        .flatMap(ctx -> emitSessionEvent(convId, userId, sessionId).thenReturn(ctx))
                         .flatMap(ctx -> supervisor.route(ctx)
                                 .doOnNext(d -> {
                                     log.info("[Pipeline:stream] userId={} sessionId={} query='{}' -> agents={} reason='{}' refinedQuery='{}'",
@@ -136,14 +147,54 @@ public class AgentOrchestrator {
 
         // Kick off the runner; events flow through the bus.
         runner
+                .onErrorResume(err -> {
+                    failed.set(true);
+                    log.error("[Orchestrator] stream pipeline failed", err);
+                    eventBus.emit(convId, toErrorEvent(err));
+                    return Mono.empty();
+                })
                 .doFinally(sig -> {
-                    eventBus.emit(convId, new AgentStreamEvent.DoneEvent(sessionId, tokenCount.get()));
+                    if (!failed.get()) {
+                        eventBus.emit(convId, new AgentStreamEvent.DoneEvent(sessionId, tokenCount.get()));
+                    }
                     eventBus.complete(convId);
                 })
-                .subscribe(null,
-                        err -> log.error("[Orchestrator] stream pipeline failed", err));
+                .subscribe();
 
-        return sink.asFlux();
+        // Outbound filter: keep parity with /chat/text by NOT leaking personal-RAG
+        // citations to the client. They remain on the in-memory event bus (and in
+        // server logs / tracing), but are stripped from the SSE flux.
+        return sink.asFlux().filter(AgentOrchestrator::isClientVisible);
+    }
+
+    private static boolean isClientVisible(AgentStreamEvent ev) {
+        if (ev instanceof AgentStreamEvent.ToolEvent te) {
+            // Whitelist: only webSearch tool events are exposed to clients.
+            return "webSearch".equals(te.name());
+        }
+        return true;
+    }
+
+    private Mono<Void> emitSessionEvent(String convId, Long userId, String sessionId) {
+        return chatSessionService.findForUser(userId, sessionId)
+                .doOnNext(session -> eventBus.emit(convId,
+                        new AgentStreamEvent.SessionEvent(session.getSessionId(), session.getTitle())))
+                .onErrorResume(e -> {
+                    log.warn("[Orchestrator] failed to load session for SessionEvent: {}", e.getMessage());
+                    return Mono.empty();
+                })
+                .then();
+    }
+
+    private static AgentStreamEvent.ErrorEvent toErrorEvent(Throwable err) {
+        if (err instanceof SessionLimitExceededException) {
+            return new AgentStreamEvent.ErrorEvent("SESSION_LIMIT_EXCEEDED", err.getMessage());
+        }
+        if (err instanceof IllegalArgumentException) {
+            return new AgentStreamEvent.ErrorEvent("BAD_REQUEST", err.getMessage());
+        }
+        return new AgentStreamEvent.ErrorEvent("INTERNAL_ERROR",
+                err.getMessage() == null ? "Stream pipeline failed" : err.getMessage());
     }
 
     // ---------------------------------------------------------------
@@ -274,23 +325,20 @@ public class AgentOrchestrator {
         List<CitationRef> citations = new ArrayList<>();
         List<AgentStreamEvent> events = eventBus.snapshot(convId);
         for (AgentStreamEvent ev : events) {
-            if (ev instanceof AgentStreamEvent.ToolEvent te) {
-                if ("webSearch".equals(te.name()) && te.results() instanceof List<?> list) {
-                    for (Object o : list) {
-                        if (o instanceof Map<?, ?> m) {
-                            sources.add(new SourceRef(
-                                    asString(m.get("title")),
-                                    asString(m.get("url")),
-                                    asString(m.get("snippet"))));
-                        }
-                    }
-                } else if ("personal_rag.retrieve".equals(te.name()) && te.results() instanceof List<?> list) {
-                    for (Object o : list) {
-                        if (o instanceof Map<?, ?> m) {
-                            citations.add(new CitationRef(
-                                    asString(m.get("documentId")),
-                                    asString(m.get("snippet"))));
-                        }
+            if (ev instanceof AgentStreamEvent.ToolEvent te
+                    && "webSearch".equals(te.name())
+                    && te.results() instanceof List<?> list) {
+                // Citations are exposed to the client ONLY when sourced from the
+                // web-search agent. personal_rag.retrieve events are intentionally
+                // ignored here (and filtered from the SSE sink) so private
+                // knowledge-base hits never leak to clients.
+                for (Object o : list) {
+                    if (o instanceof Map<?, ?> m) {
+                        String title   = asString(m.get("title"));
+                        String url     = asString(m.get("url"));
+                        String snippet = asString(m.get("snippet"));
+                        sources.add(new SourceRef(title, url, snippet));
+                        citations.add(new CitationRef(title, url, snippet));
                     }
                 }
             }
