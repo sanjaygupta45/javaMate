@@ -19,6 +19,17 @@ public final class AgentPrompts {
                - Has access to the user's own uploaded documents (notes, PDFs, code, study material).
                - Pick this ONLY when the question clearly refers to the user's personal material,
                  e.g. "summarise my notes", "what did I save about Kafka", "in my uploaded doc...".
+               - HARD RULE - ALWAYS include PERSONAL_RAG when the user explicitly asks to use
+                 their own material. Trigger phrases include (case-insensitive, any language variant):
+                   * "use my knowledge", "from my knowledge", "based on my knowledge"
+                   * "my notes", "my docs", "my documents", "my files", "my material"
+                   * "my pdf", "from the pdf", "from my pdf", "in the pdf", "uploaded pdf",
+                     "reference the pdf", "use the pdf", "according to the pdf"
+                   * "my uploads", "uploaded doc", "uploaded document", "uploaded file"
+                   * "answer from my data", "based on my data", "reference my"
+                 When ANY such phrase is present, PERSONAL_RAG MUST be in the agents list
+                 (alone, or paired with JAVA_KNOWLEDGE if a conceptual fallback is also useful).
+                 In this case set "reason" to: "User explicitly requested personal knowledge base."
 
             2. JAVA_KNOWLEDGE
                - Senior Java / Spring / JVM expert. Pure model knowledge, no external data.
