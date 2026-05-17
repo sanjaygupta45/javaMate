@@ -8,5 +8,7 @@ public enum AgentName {
     PERSONAL_RAG,
     JAVA_KNOWLEDGE,
     WEB_SEARCH,
-    CODE_GEN
+    CODE_GEN,
+    INTERVIEW_PREP,
+    ROADMAP
 }
