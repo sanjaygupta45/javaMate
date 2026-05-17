@@ -11,13 +11,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * Thin facade over the multi-agent {@link AgentOrchestrator}.
- *
- * <p>All routing, retrieval, web search and synthesis live in the {@code agent} package.
- * This class exists only to satisfy the existing {@link AIService} contract used by
- * controllers and {@link com.example.javamate.service.JavaMateService}.
- */
 @Service
 @RequiredArgsConstructor
 public class AIServiceImpl implements AIService {

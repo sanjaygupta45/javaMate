@@ -1,17 +1,23 @@
 package com.example.javamate.config;
 
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.CorsWebFilter;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
+import org.springframework.util.StringUtils;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
 public class CorsConfig {
+
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:5174,https://java-mate-fe.vercel.app}")
+    private String allowedOriginsProperty;
 
     // Exposing CorsConfigurationSource so Spring Security's .cors() picks it up,
     // and CorsWebFilter so CORS is also applied outside the security chain (for OPTIONS).
@@ -19,11 +25,12 @@ public class CorsConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOrigins(List.of(
-                "http://localhost:5173",
-                "http://localhost:5174",
-                "https://java-mate-fe.vercel.app"
-        ));
+        List<String> allowedOrigins = Arrays.stream(allowedOriginsProperty.split(","))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .toList();
+
+        config.setAllowedOrigins(allowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         // Explicitly listing Authorization avoids browser dropping the header after preflight
         config.setAllowedHeaders(List.of(

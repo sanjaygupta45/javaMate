@@ -21,18 +21,7 @@ import java.util.List;
 
 import static com.example.javamate.constants.AppConstants.*;
 
-/**
- * JavaMate service implementation.
- * 
- * Chat Memory is handled by Spring AI's MessageChatMemoryAdvisor:
- * - Messages are automatically saved to ChatMemory by the advisor
- * - History is automatically retrieved and added to prompts
- * 
- * This service only handles:
- * - Session limit checking (before allowing a query)
- * - Session ID resolution
- * - Error handling
- */
+
 @Service
 @RequiredArgsConstructor
 public class JavaMateServiceImpl implements JavaMateService {

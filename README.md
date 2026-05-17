@@ -262,7 +262,7 @@ src/main/java/com/example/javamate/
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/mate/auth/register`, `/login` | JWT issuance |
+| `POST` | `/mate/auth/register`, `/login`, `/google` | JWT issuance (email or Google OAuth2 ID token) |
 | `POST` | `/mate/chat/text` | Non-streaming chat |
 | `POST` | `/mate/chat/stream` | SSE token stream |
 | `GET` / `DELETE` | `/mate/sessions/**` | List / clear chat sessions |
@@ -309,7 +309,7 @@ flowchart LR
 | Local stack | `docker compose up -d` | `local` | Adds MySQL + full observability stack |
 | Cloud Run | `gcloud run deploy` with `SPRING_PROFILES_ACTIVE=prod` | `prod` | JSON logs, smaller pool, sampling 10 %, secrets from Secret Manager |
 
-**Required env vars:** `MISTRAL_API_KEY`, `QDRANT_API_KEY`, `MYSQL_PASSWORD`, `JWT_SECRET`. Prod also needs `CLOUD_SQL_HOST`. Optional: `WEB_SEARCH_PROVIDER=tavily` + `TAVILY_API_KEY` to enable web search.
+**Required env vars:** `MISTRAL_API_KEY`, `QDRANT_API_KEY`, `MYSQL_PASSWORD`, `JWT_SECRET`. Prod also needs `CLOUD_SQL_HOST`. Optional: `GOOGLE_OAUTH_CLIENT_IDS` for Google sign-in and `WEB_SEARCH_PROVIDER=tavily` + `TAVILY_API_KEY` to enable web search.
 
 ---
 

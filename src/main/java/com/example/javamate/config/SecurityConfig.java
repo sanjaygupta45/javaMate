@@ -24,12 +24,12 @@ public class SecurityConfig {
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
 
         return http
-                .cors(cors -> {})    // picks up CorsConfigurationSource bean
+                .cors(cors -> {})
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .logout(ServerHttpSecurity.LogoutSpec::disable)
-                // Return 401 (not 302 redirect) when unauthenticated so browsers don't follow redirects
+                // Return 401 (not 302 redirect) when unauthenticated
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED))
                 )

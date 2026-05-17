@@ -1,6 +1,7 @@
 package com.example.javamate.controller;
 
 import com.example.javamate.dto.AuthResponseDTO;
+import com.example.javamate.dto.GoogleAuthRequestDTO;
 import com.example.javamate.dto.LoginRequestDTO;
 import com.example.javamate.dto.RegisterRequestDTO;
 import com.example.javamate.service.UserService;
@@ -37,6 +38,15 @@ public class AuthController {
         log.info("Received login request for email: {}", request.getEmail());
 
         return userService.login(request)
+                .map(ResponseEntity::ok);
+    }
+
+
+    @PostMapping("/google")
+    public Mono<ResponseEntity<AuthResponseDTO>> googleLogin(@Valid @RequestBody GoogleAuthRequestDTO request) {
+        log.info("Received Google login request");
+
+        return userService.loginWithGoogle(request.getIdToken())
                 .map(ResponseEntity::ok);
     }
 }

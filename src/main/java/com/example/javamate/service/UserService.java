@@ -12,6 +12,8 @@ public interface UserService {
 
     Mono<AuthResponseDTO> login(LoginRequestDTO request);
 
+    Mono<AuthResponseDTO> loginWithGoogle(String googleIdToken);
+
     Mono<User> findByEmail(String email);
 
     Mono<User> findById(Long userId);
