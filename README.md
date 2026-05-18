@@ -6,7 +6,7 @@
 
 [![Java](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)]()
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-6DB33F?logo=springboot&logoColor=white)]()
-[![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0-6DB33F?logo=spring&logoColor=white)]()
+[![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0%20M2-6DB33F?logo=spring&logoColor=white)]()
 [![WebFlux](https://img.shields.io/badge/Reactive-WebFlux-1A8FFF)]()
 [![Qdrant](https://img.shields.io/badge/Vector%20DB-Qdrant-DC382D)]()
 [![MySQL](https://img.shields.io/badge/MySQL-R2DBC-4479A1?logo=mysql&logoColor=white)]()
@@ -31,17 +31,6 @@ The longer version is in the code.
 
 ---
 
-## What it does
-
-- Answers Java / Spring / JVM questions like a senior dev.
-- Looks things up in your **own uploaded documents** (per-user RAG over Qdrant).
-- Calls the **public web** for fresh stuff (releases, versions, CVEs) via a tool the LLM can invoke itself.
-- **Generates real code** with a built-in critic that reviews the draft and asks for a revision if it spots bugs or missing tests.
-- Streams answers token-by-token over **Server-Sent Events**.
-- Remembers conversations, auto-summarises old turns when the history gets long.
-- Emits OpenTelemetry spans for every agent and every tool call, viewable in Grafana Tempo.
-
----
 
 ## Architecture at a glance
 
@@ -70,16 +59,22 @@ flowchart TD
         Java["JavaKnowledgeAgent"]
         Web["WebSearchAgent"]
         Code["CodeGenAgent"]
+        Interview["InterviewPrepAgent"]
+        Roadmap["RoadmapAgent"]
     end
 
     Rag --> Qdrant
     Web -->|"@Tool webSearch"| Tavily
+    Interview -->|"@Tool webSearch"| Tavily
+    Roadmap -->|"@Tool webSearch"| Tavily
     Code <-->|"reflection loop"| Critic
 
     Rag  -.-> LLM
     Java -.-> LLM
     Web  -.-> LLM
     Code -.-> LLM
+    Interview -.-> LLM
+    Roadmap -.-> LLM
     Critic -.-> LLM
     Supervisor -.-> LLM
 
@@ -90,7 +85,7 @@ flowchart TD
     classDef store fill:#f0f5ec,stroke:#52a838,color:#1b3a0f;
     classDef obs fill:#f6e6ff,stroke:#7b3fb5,color:#2d1144;
 
-    class Rag,Java,Web,Code,Supervisor,Critic agent;
+    class Rag,Java,Web,Code,Interview,Roadmap,Supervisor,Critic agent;
     class Tavily,LLM ext;
     class Memory,Qdrant store;
     class Obs obs;
@@ -104,7 +99,7 @@ flowchart TD
 
 ### Multi-agent
 - Supervisor pattern with typed structured-output routing (a Java record, not regex over LLM JSON).
-- 4 specialist agents + 1 critic, each with its own system prompt and temperature.
+- 6 specialist agents + 1 critic, each with its own system prompt and temperature (PersonalRag, JavaKnowledge, WebSearch, CodeGen, InterviewPrep, Roadmap).
 - Reflection loop for code generation. The Critic returns `CritiqueResult{approved, issues[], suggestions}` and the drafter revises (max 1 revision, configurable).
 - Parallel fan-out when two specialists are needed (`Flux.merge`), then a synthesizer LLM call to merge their answers.
 
@@ -135,7 +130,7 @@ flowchart TD
 ### Engineering
 - Fully reactive (Spring WebFlux + R2DBC). Blocking SDK calls run on `Schedulers.boundedElastic()`.
 - Clean package layout: `agent`, `service`, `controller`, `repository`, `security`, `config`.
-- Test profile with dummy creds so `mvn test` runs anywhere.
+- Test profile with dummy creds so the Spring context loads in CI.
 - Dockerised with `docker-compose` bundling the app, Prometheus, Tempo, OTel collector and Grafana.
 
 ---
@@ -144,8 +139,8 @@ flowchart TD
 
 | Layer | Tech | Why |
 |---|---|---|
-| Runtime | Java 21 | Records, virtual-thread friendly, switch patterns |
-| Framework | Spring Boot 4, Spring AI 2.0, Spring WebFlux, Spring Security | Spring AI gave me `@Tool`, structured output and `ChatMemory` for free |
+| Runtime | Java 21 | Records, pattern-matching switch, sealed types |
+| Framework | Spring Boot 4, Spring AI 2.0 (M2), Spring WebFlux, Spring Security | Spring AI gave me `@Tool`, structured output and `ChatMemory` for free |
 | LLM | Mistral AI (chat + embeddings) | Cheap, good function-calling, hosted |
 | Vector DB | Qdrant (gRPC) | Per-user filter is native, no extra schema work |
 | Relational DB | MySQL via R2DBC | The rest of the stack is reactive, I didn't want a blocking JDBC pool starving under SSE load |
@@ -199,18 +194,6 @@ sequenceDiagram
 
 Every step emits an OpenTelemetry span (`agent.orchestrator.handle` -> `agent.supervisor.route` -> `agent.<name>` -> `tool.web_search` / `agent.critic` / etc.), so the whole turn shows up as a waterfall in Tempo.
 
-### What different queries route to
-
-| Query | Route | LLM calls |
-|---|---|---|
-| *"What is `volatile` vs `synchronized`?"* | `[JAVA_KNOWLEDGE]` | 2 |
-| *"Summarise my uploaded design notes"* | `[PERSONAL_RAG]` | 2 |
-| *"Latest Spring Boot 4 release date?"* | `[WEB_SEARCH]` | 3 |
-| *"Implement a thread-safe LRU cache with tests"* | `[CODE_GEN]` | 3-4 |
-| *"Compare my notes' DI definition with the standard one"* | `[PERSONAL_RAG, JAVA_KNOWLEDGE]` | 4 |
-
----
-
 ## CodeGenAgent: the reflection loop
 
 ```mermaid
@@ -244,6 +227,8 @@ src/main/java/com/example/javamate/
 │   ├── JavaKnowledgeAgent.java      pure LLM
 │   ├── WebSearchAgent.java          LLM + @Tool
 │   ├── CodeGenAgent.java            reflection loop
+│   ├── InterviewPrepAgent.java      fresher-focused Q&A, LLM + @Tool webSearch (+ fallback)
+│   ├── RoadmapAgent.java            learning roadmaps, LLM + @Tool webSearch (+ fallback)
 │   ├── critic/{CriticAgent, CritiqueResult}.java
 │   ├── router/RouteDecision.java
 │   ├── prompts/AgentPrompts.java
@@ -262,19 +247,82 @@ src/main/java/com/example/javamate/
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/mate/auth/register`, `/login`, `/google` | JWT issuance (email or Google OAuth2 ID token) |
+| `POST` | `/mate/auth/register` | Register (email) → returns JWT |
+| `POST` | `/mate/auth/login` | Login (email) → returns JWT |
+| `POST` | `/mate/auth/google` | Exchange Google OAuth2 **ID token** for a JWT |
 | `POST` | `/mate/chat/text` | Non-streaming chat |
-| `POST` | `/mate/chat/stream` | SSE token stream |
-| `GET` / `DELETE` | `/mate/sessions/**` | List / clear chat sessions |
-| `POST` | `/mate/documents/upload` | RAG ingestion (PDF / Tika / text / JSON) |
-| `GET` | `/mate/health`, `/mate/actuator/**` | Liveness, metrics, prometheus |
+| `POST` | `/mate/chat/stream` | SSE token stream (typed `AgentStreamEvent`s) |
+| `GET` / `POST` / `DELETE` | `/mate/chat/sessions/**` | List / create / continue / delete chat sessions |
+| `POST` | `/mate/documents/upload` | RAG ingestion (PDF / Tika / text / JSON) — `multipart/form-data`, field `file` |
+| `GET` | `/mate/documents`, `/mate/documents/{id}` | List user's RAG documents or fetch one |
+| `DELETE` | `/mate/documents/{id}` | Delete a RAG document |
+| `GET` | `/mate/health`, `/mate/actuator/**` | Liveness (used by Cloud Run / Docker), metrics, Prometheus |
 | `GET` | `/mate/swagger-ui.html` | Live OpenAPI docs |
+
+> When a session hits `SESSION_LIMIT_EXCEEDED` (see Limits below), call `POST /mate/chat/sessions/new` to mint a fresh session id.
 
 ---
 
+## Limits & quotas
+
+Defaults baked into `application.properties` and the agent code. All are overridable per environment.
+
+| Limit | Default                          | Where | Behaviour when exceeded |
+|---|----------------------------------|---|---|
+| Documents per user (RAG) | **10**                           | `javamate.knowledge-base.max-documents-per-user` | Upload rejected — delete one via `DELETE /mate/documents/{id}` |
+| User messages per session | **30**                           | `javamate.chat.memory.max-messages-per-session` | Response returns `SESSION_LIMIT_EXCEEDED` — call `POST /mate/chat/sessions/new` (or `/continue`) |
+| Upload size cap | **100 MB**                       | `spring.webflux.multipart.max-file-size` | `413 Payload Too Large` |
+| Context window (recent msgs in prompt) | **20**                           | `javamate.chat.memory.window-size` | Older turns are compacted, not dropped |
+| Auto-compaction threshold | **5** stale msgs past the window | `javamate.chat.memory.compact-threshold` | Oldest messages summarised by LLM and stored as a `SUMMARY` row |
+| Critic revisions per code-gen turn | **1**                            | `MAX_REVISIONS` in `CodeGenAgent` | Returns the latest draft as-is |
+
+---
+
+## Document ingestion
+
+`POST /mate/documents/upload` accepts a single multipart `file`. The content type is sniffed and routed by `DocumentReaderFactory` to the right `DocumentReader` implementation (Strategy + Factory pattern — adding a new format is a one-class change).
+
+Extracted text is chunked (`ChunkingService` + `ChunkingConfig`), embedded via Mistral, and stored in Qdrant with a `userId` payload so every retrieval is automatically tenant-scoped.
+
+```mermaid
+flowchart LR
+    Up([POST /documents/upload<br/>multipart 'file']) --> Quota{"UserDocumentService<br/>quota check<br/>(≤ 10 / user)"}
+    Quota -- "over limit" --> Rej([reject<br/>409])
+    Quota -- "ok" --> Factory["DocumentReaderFactory<br/>(Strategy + Factory)"]
+
+    Factory -- "application/pdf" --> Pdf["PdfDocumentReader<br/>(PDFBox 3.0)"]
+    Factory -- "*json*" --> Json["JsonDocumentReader<br/>(JDK)"]
+    Factory -- "text/plain" --> Txt["TextDocumentReader<br/>(JDK)"]
+    Factory -- "fallback<br/>(docx, html, md, …)" --> Tika["TikaDocumentReader<br/>(Tika 2.9)"]
+
+    Pdf --> Text["raw text"]
+    Json --> Text
+    Txt --> Text
+    Tika --> Text
+
+    Text --> Chunk["ChunkingService<br/>(size + overlap from<br/>ChunkingConfig)"]
+    Chunk --> Embed["Mistral embeddings"]
+    Embed --> Qdr[("Qdrant<br/>payload: { userId, docId, … }<br/>filtered on every query")]
+    Chunk --> Meta[("MySQL<br/>user_documents row")]
+
+    classDef step fill:#e8f0ff,stroke:#3367d6,color:#0b1f4d;
+    classDef store fill:#f0f5ec,stroke:#52a838,color:#1b3a0f;
+    classDef bad  fill:#fdecec,stroke:#c0392b,color:#5b1a14;
+    class Factory,Pdf,Json,Txt,Tika,Chunk,Embed step;
+    class Qdr,Meta store;
+    class Rej bad;
+```
+
+---
+
+
 ## Deployment
 
-Same image, three targets. The active Spring profile and a handful of env vars are the only difference.
+One build artifact, three runtime targets. The only thing that changes between them is the active Spring profile and a handful of env vars — the JAR and the Docker image are identical.
+
+**The image.** A multi-stage-friendly `Dockerfile` on top of `eclipse-temurin:21-jre-jammy`. It creates a non-root `javamate` user, copies the fat JAR built by Maven, runs under `dumb-init` for clean PID-1 signal handling, applies container-aware JVM flags (`-XX:+UseContainerSupport`, `MaxRAMPercentage=75`), and ships a `HEALTHCHECK` that hits `/mate/actuator/health`. It listens on `$PORT` (defaults to `8080`) so it drops into Cloud Run with zero config.
+
+**The flow.**
 
 ```mermaid
 flowchart LR
@@ -303,6 +351,14 @@ flowchart LR
     class Mistral,Qdrant,Tavily ext;
 ```
 
+1. **Build once.** `./mvnw -DskipTests package` produces `target/javamate-*.jar`. `docker build .` bakes that JAR into the runtime image.
+2. **Local dev** runs the JAR directly with `./mvnw spring-boot:run` on the `local` profile (port `8081`). It still talks to **Qdrant Cloud** and **Cloud SQL** over the network, so you get production-shaped behaviour without the observability stack overhead.
+3. **Local stack** (`docker compose up -d`) starts the app plus the full sidecar set: **MySQL 8** (instead of Cloud SQL), **OTel Collector**, **Prometheus**, **Tempo**, **Loki** and a pre-provisioned **Grafana** (admin/admin on `:3000`). The app pushes OTLP traces/metrics to `otel-collector:4317`, which fans them out to Tempo + Loki; Grafana datasources are auto-wired from `observability/grafana/provisioning/`. Use this when you want to actually watch a chat turn become a Tempo waterfall.
+4. **Cloud Run** runs the same image with `SPRING_PROFILES_ACTIVE=prod`, listens on `$PORT=8080`, mounts `JWT_SECRET` / `MISTRAL_API_KEY` / `QDRANT_API_KEY` / `MYSQL_PASSWORD` from **Secret Manager**, and talks to **Cloud SQL (MySQL)** over its public IP with `sslMode=PREFERRED`. The prod profile flips logs to JSON for Cloud Logging, drops trace sampling to **10 %**, shrinks the DB pool, and enables **HTTP/2 cleartext (h2c)** via `NettyH2cConfig` — that last bit is why the 100 MB upload cap actually works behind Cloud Run's HTTP/1 body size limit.
+
+External dependencies (**Mistral**, **Qdrant Cloud**, **Tavily**) are the same across all three targets; only the credentials change.
+
+
 | Target | Command | Profile | Notes |
 |---|---|---|---|
 | Local dev | `./mvnw spring-boot:run` | `local` | Hits Qdrant Cloud + Cloud SQL directly |
@@ -310,6 +366,17 @@ flowchart LR
 | Cloud Run | `gcloud run deploy` with `SPRING_PROFILES_ACTIVE=prod` | `prod` | JSON logs, smaller pool, sampling 10 %, secrets from Secret Manager |
 
 **Required env vars:** `MISTRAL_API_KEY`, `QDRANT_API_KEY`, `MYSQL_PASSWORD`, `JWT_SECRET`. Prod also needs `CLOUD_SQL_HOST`. Optional: `GOOGLE_OAUTH_CLIENT_IDS` for Google sign-in and `WEB_SEARCH_PROVIDER=tavily` + `TAVILY_API_KEY` to enable web search.
+
+---
+
+## Companion frontend & demo
+
+JavaMate ships as a **backend-only Spring service**. The chat UI lives in a separate repo:
+
+- **Frontend repo:** [`java-mate-fe`](https://github.com/sanjaygupta45/javaMate-fe) (React + Tailwind CSS)
+- **Live demo:** <https://java-mate-fe.vercel.app>
+- **Live API:** Cloud Run deployment, talked to by the frontend above
+- **Swagger UI (prod):** `https://javamate-895510939347.us-central1.run.app/mate/swagger-ui.html`
 
 ---
 
