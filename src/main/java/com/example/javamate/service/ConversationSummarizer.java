@@ -12,21 +12,11 @@ import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 
-/**
- * Produces a short, structured "handoff" summary from a conversation transcript,
- * used to seed a new chat session when the user continues from a previous one.
- *
- * <p>This is a different summariser from the auto-compaction summariser in
- * {@code ChatMemoryConfig}: that one fires inline to shrink the LLM context
- * window of an active session. This one fires explicitly when the user calls
- * {@code POST /chat/sessions/continue} after hitting the 30-message limit.
- */
 @Component
 public class ConversationSummarizer {
 
     private static final Logger log = LoggerFactory.getLogger(ConversationSummarizer.class);
 
-    /** Maximum characters of transcript fed to the LLM (cheap safety bound). */
     private static final int MAX_TRANSCRIPT_CHARS = 16_000;
 
     private static final String SYSTEM_PROMPT = """
