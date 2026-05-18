@@ -31,6 +31,16 @@ The longer version is in the code.
 
 ---
 
+## Companion frontend & demo
+
+JavaMate ships as a **backend-only Spring service**. The chat UI lives in a separate repo:
+
+- **Frontend repo:** [`java-mate-fe`](https://github.com/sanjaygupta45/javaMate-fe) (React + Tailwind CSS)
+- **Live demo:** <https://java-mate-fe.vercel.app>
+- **Live API:** Cloud Run deployment, talked to by the frontend above
+- **Swagger UI (prod):** [`Swagger-Docs`](https://javamate-895510939347.us-central1.run.app/mate/swagger-ui.html)
+
+---
 
 ## Architecture at a glance
 
@@ -194,6 +204,8 @@ sequenceDiagram
 
 Every step emits an OpenTelemetry span (`agent.orchestrator.handle` -> `agent.supervisor.route` -> `agent.<name>` -> `tool.web_search` / `agent.critic` / etc.), so the whole turn shows up as a waterfall in Tempo.
 
+---
+
 ## CodeGenAgent: the reflection loop
 
 ```mermaid
@@ -213,68 +225,6 @@ flowchart LR
 ```
 
 Default is one revision max, so a code question costs 2–3 LLM calls. Tune `MAX_REVISIONS` in `CodeGenAgent` for stricter or cheaper behaviour.
-
----
-
-## Project layout
-
-```
-src/main/java/com/example/javamate/
-├── agent/                          ← multi-agent layer
-│   ├── Agent.java   AgentContext.java   AgentName.java   AgentResult.java
-│   ├── SupervisorAgent.java         router + synthesizer
-│   ├── PersonalRagAgent.java        Qdrant-backed RAG
-│   ├── JavaKnowledgeAgent.java      pure LLM
-│   ├── WebSearchAgent.java          LLM + @Tool
-│   ├── CodeGenAgent.java            reflection loop
-│   ├── InterviewPrepAgent.java      fresher-focused Q&A, LLM + @Tool webSearch (+ fallback)
-│   ├── RoadmapAgent.java            learning roadmaps, LLM + @Tool webSearch (+ fallback)
-│   ├── critic/{CriticAgent, CritiqueResult}.java
-│   ├── router/RouteDecision.java
-│   ├── prompts/AgentPrompts.java
-│   ├── tools/{WebSearchClient, Tavily…, NoOp…, WebSearchTools}.java
-│   ├── tracing/AgentTracing.java
-│   └── orchestrator/AgentOrchestrator.java
-├── service/  controller/  config/  security/
-├── dto/  entity/  repository/
-├── factory/  readerHandler/         document ingestion (PDF, Tika, Text, JSON)
-└── utils/  exception/  constants/
-```
-
----
-
-## API endpoints (excerpt)
-
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/mate/auth/register` | Register (email) → returns JWT |
-| `POST` | `/mate/auth/login` | Login (email) → returns JWT |
-| `POST` | `/mate/auth/google` | Exchange Google OAuth2 **ID token** for a JWT |
-| `POST` | `/mate/chat/text` | Non-streaming chat |
-| `POST` | `/mate/chat/stream` | SSE token stream (typed `AgentStreamEvent`s) |
-| `GET` / `POST` / `DELETE` | `/mate/chat/sessions/**` | List / create / continue / delete chat sessions |
-| `POST` | `/mate/documents/upload` | RAG ingestion (PDF / Tika / text / JSON) — `multipart/form-data`, field `file` |
-| `GET` | `/mate/documents`, `/mate/documents/{id}` | List user's RAG documents or fetch one |
-| `DELETE` | `/mate/documents/{id}` | Delete a RAG document |
-| `GET` | `/mate/health`, `/mate/actuator/**` | Liveness (used by Cloud Run / Docker), metrics, Prometheus |
-| `GET` | `/mate/swagger-ui.html` | Live OpenAPI docs |
-
-> When a session hits `SESSION_LIMIT_EXCEEDED` (see Limits below), call `POST /mate/chat/sessions/new` to mint a fresh session id.
-
----
-
-## Limits & quotas
-
-Defaults baked into `application.properties` and the agent code. All are overridable per environment.
-
-| Limit | Default                          | Where | Behaviour when exceeded |
-|---|----------------------------------|---|---|
-| Documents per user (RAG) | **10**                           | `javamate.knowledge-base.max-documents-per-user` | Upload rejected — delete one via `DELETE /mate/documents/{id}` |
-| User messages per session | **30**                           | `javamate.chat.memory.max-messages-per-session` | Response returns `SESSION_LIMIT_EXCEEDED` — call `POST /mate/chat/sessions/new` (or `/continue`) |
-| Upload size cap | **100 MB**                       | `spring.webflux.multipart.max-file-size` | `413 Payload Too Large` |
-| Context window (recent msgs in prompt) | **20**                           | `javamate.chat.memory.window-size` | Older turns are compacted, not dropped |
-| Auto-compaction threshold | **5** stale msgs past the window | `javamate.chat.memory.compact-threshold` | Oldest messages summarised by LLM and stored as a `SUMMARY` row |
-| Critic revisions per code-gen turn | **1**                            | `MAX_REVISIONS` in `CodeGenAgent` | Returns the latest draft as-is |
 
 ---
 
@@ -315,6 +265,40 @@ flowchart LR
 
 ---
 
+## API endpoints (excerpt)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/mate/auth/register` | Register (email) → returns JWT |
+| `POST` | `/mate/auth/login` | Login (email) → returns JWT |
+| `POST` | `/mate/auth/google` | Exchange Google OAuth2 **ID token** for a JWT |
+| `POST` | `/mate/chat/text` | Non-streaming chat |
+| `POST` | `/mate/chat/stream` | SSE token stream (typed `AgentStreamEvent`s) |
+| `GET` / `POST` / `DELETE` | `/mate/chat/sessions/**` | List / create / continue / delete chat sessions |
+| `POST` | `/mate/documents/upload` | RAG ingestion (PDF / Tika / text / JSON) — `multipart/form-data`, field `file` |
+| `GET` | `/mate/documents`, `/mate/documents/{id}` | List user's RAG documents or fetch one |
+| `DELETE` | `/mate/documents/{id}` | Delete a RAG document |
+| `GET` | `/mate/health`, `/mate/actuator/**` | Liveness (used by Cloud Run / Docker), metrics, Prometheus |
+| `GET` | `/mate/swagger-ui.html` | Live OpenAPI docs |
+
+> When a session hits `SESSION_LIMIT_EXCEEDED` (see Limits below), call `POST /mate/chat/sessions/new` to mint a fresh session id.
+
+---
+
+## Limits & quotas
+
+Defaults baked into `application.properties` and the agent code. All are overridable per environment.
+
+| Limit | Default | Where | Behaviour when exceeded |
+|---|---|---|---|
+| Documents per user (RAG) | **10** | `javamate.knowledge-base.max-documents-per-user` | Upload rejected — delete one via `DELETE /mate/documents/{id}` |
+| User messages per session | **30** | `javamate.chat.memory.max-messages-per-session` | Response returns `SESSION_LIMIT_EXCEEDED` — call `POST /mate/chat/sessions/new` (or `/continue`) |
+| Upload size cap | **100 MB** | `spring.webflux.multipart.max-file-size` | `413 Payload Too Large` |
+| Context window (recent msgs in prompt) | **20** | `javamate.chat.memory.window-size` | Older turns are compacted, not dropped |
+| Auto-compaction threshold | **5** stale msgs past the window | `javamate.chat.memory.compact-threshold` | Oldest messages summarised by LLM and stored as a `SUMMARY` row |
+| Critic revisions per code-gen turn | **1** | `MAX_REVISIONS` in `CodeGenAgent` | Returns the latest draft as-is |
+
+---
 
 ## Deployment
 
@@ -358,7 +342,6 @@ flowchart LR
 
 External dependencies (**Mistral**, **Qdrant Cloud**, **Tavily**) are the same across all three targets; only the credentials change.
 
-
 | Target | Command | Profile | Notes |
 |---|---|---|---|
 | Local dev | `./mvnw spring-boot:run` | `local` | Hits Qdrant Cloud + Cloud SQL directly |
@@ -369,14 +352,30 @@ External dependencies (**Mistral**, **Qdrant Cloud**, **Tavily**) are the same a
 
 ---
 
-## Companion frontend & demo
+## Project layout
 
-JavaMate ships as a **backend-only Spring service**. The chat UI lives in a separate repo:
-
-- **Frontend repo:** [`java-mate-fe`](https://github.com/sanjaygupta45/javaMate-fe) (React + Tailwind CSS)
-- **Live demo:** <https://java-mate-fe.vercel.app>
-- **Live API:** Cloud Run deployment, talked to by the frontend above
-- **Swagger UI (prod):** `https://javamate-895510939347.us-central1.run.app/mate/swagger-ui.html`
+```
+src/main/java/com/example/javamate/
+├── agent/                          ← multi-agent layer
+│   ├── Agent.java   AgentContext.java   AgentName.java   AgentResult.java
+│   ├── SupervisorAgent.java         router + synthesizer
+│   ├── PersonalRagAgent.java        Qdrant-backed RAG
+│   ├── JavaKnowledgeAgent.java      pure LLM
+│   ├── WebSearchAgent.java          LLM + @Tool
+│   ├── CodeGenAgent.java            reflection loop
+│   ├── InterviewPrepAgent.java      fresher-focused Q&A, LLM + @Tool webSearch (+ fallback)
+│   ├── RoadmapAgent.java            learning roadmaps, LLM + @Tool webSearch (+ fallback)
+│   ├── critic/{CriticAgent, CritiqueResult}.java
+│   ├── router/RouteDecision.java
+│   ├── prompts/AgentPrompts.java
+│   ├── tools/{WebSearchClient, Tavily…, NoOp…, WebSearchTools}.java
+│   ├── tracing/AgentTracing.java
+│   └── orchestrator/AgentOrchestrator.java
+├── service/  controller/  config/  security/
+├── dto/  entity/  repository/
+├── factory/  readerHandler/         document ingestion (PDF, Tika, Text, JSON)
+└── utils/  exception/  constants/
+```
 
 ---
 
@@ -409,3 +408,4 @@ JavaMate ships as a **backend-only Spring service**. The chat UI lives in a sepa
 **Built with Java 21, Spring AI, Reactor and a lot of caffeine.** ☕
 
 </div>
+
