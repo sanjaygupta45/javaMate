@@ -30,7 +30,7 @@ public class ConversationSummarizer {
             2. **Key facts & decisions** - 3-7 bullets of concrete information already
                established (versions chosen, files touched, design choices made).
             3. **Code / artefacts** - any class names, method signatures, libraries
-               or commands that came up. Keep this terse.
+                or commands that came up. Keep this terse.
             4. **Open questions** - what was unresolved or what the user was about
                to ask next.
             5. **User preferences** - tone, language, style hints the assistant

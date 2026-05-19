@@ -140,6 +140,9 @@ jobs:
             --set-secrets=MISTRAL_API_KEY=MISTRAL_API_KEY:latest
             --set-secrets=JWT_SECRET=JWT_SECRET:latest
             --set-secrets=QDRANT_API_KEY=QDRANT_API_KEY:latest
+            --set-secrets=GOOGLE_OAUTH_CLIENT_IDS=GOOGLE_OAUTH_CLIENT_IDS:latest
+            --set-secrets=TAVILY_API_KEY=TAVILY_API_KEY:latest
+            
 
       - name: Show Deployed URL
         run: |
