@@ -46,3 +46,8 @@ build/
 *.tfstate
 *.tfstate.*
 .terraform/
+
+# Secrets - never commit
+src/main/resources/credentials/
+*service-account*.json
+*.pem
